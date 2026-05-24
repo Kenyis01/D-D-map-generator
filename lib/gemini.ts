@@ -1,14 +1,4 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import type { MapData, MapType } from "./types";
-
-const apiKey = process.env.GEMINI_API_KEY;
-
-function getClient() {
-  if (!apiKey) {
-    throw new Error("GEMINI_API_KEY is not set");
-  }
-  return new GoogleGenerativeAI(apiKey);
-}
 
 const SCHEMA_DESCRIPTION = `Return ONLY a single valid JSON object (no markdown, no backticks, no commentary) with EXACTLY this shape:
 
@@ -59,15 +49,6 @@ export async function generateMapJson(opts: {
   height?: number;
   existingMap?: MapData;
 }): Promise<MapData> {
-  const client = getClient();
-  const model = client.getGenerativeModel({
-    model: process.env.GEMINI_MODEL || "gemini-2.0-flash",
-    generationConfig: {
-      responseMimeType: "application/json",
-      temperature: 1.0
-    }
-  });
-
   const seed = Math.floor(Math.random() * 1_000_000);
   const widthHint = opts.width ?? 20;
   const heightHint = opts.height ?? 15;
@@ -92,18 +73,68 @@ Keep the same width and height. Preserve identity where it makes sense but apply
 - variation seed (only for randomness, do not include in output): ${seed}`;
   }
 
-  const fullPrompt = `${SCHEMA_DESCRIPTION}\n\n${userPrompt}`;
-
-  const result = await model.generateContent(fullPrompt);
-  const text = result.response.text().trim();
+  const text = await callLLM(SCHEMA_DESCRIPTION, userPrompt);
 
   let parsed: MapData;
   try {
     parsed = JSON.parse(stripFences(text));
   } catch (err) {
-    throw new Error(`Gemini did not return valid JSON: ${text.slice(0, 200)}`);
+    throw new Error(`LLM did not return valid JSON: ${text.slice(0, 200)}`);
   }
   return sanitize(parsed, widthHint, heightHint, mapTypeHint);
+}
+
+async function callLLM(system: string, user: string): Promise<string> {
+  const groqKey = process.env.GROQ_API_KEY;
+  const geminiKey = process.env.GEMINI_API_KEY;
+
+  if (groqKey) return callGroq(groqKey, system, user);
+  if (geminiKey) return callGemini(geminiKey, system, user);
+  throw new Error("No LLM API key configured. Set GROQ_API_KEY (recommended) or GEMINI_API_KEY.");
+}
+
+async function callGroq(apiKey: string, system: string, user: string): Promise<string> {
+  const model = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 1.0,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user }
+      ]
+    })
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Groq error ${res.status}: ${errText.slice(0, 500)}`);
+  }
+  const data = await res.json();
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content !== "string") {
+    throw new Error("Groq returned empty content");
+  }
+  return content;
+}
+
+async function callGemini(apiKey: string, system: string, user: string): Promise<string> {
+  const { GoogleGenerativeAI } = await import("@google/generative-ai");
+  const client = new GoogleGenerativeAI(apiKey);
+  const model = client.getGenerativeModel({
+    model: process.env.GEMINI_MODEL || "gemini-2.0-flash",
+    generationConfig: {
+      responseMimeType: "application/json",
+      temperature: 1.0
+    }
+  });
+  const result = await model.generateContent(`${system}\n\n${user}`);
+  return result.response.text().trim();
 }
 
 function stripFences(text: string): string {
