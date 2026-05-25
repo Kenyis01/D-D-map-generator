@@ -452,37 +452,123 @@ function proceduralSpecial(
   type: SpecialTileType,
   ts: number
 ) {
-  ctx.fillStyle = TILE_COLORS[type] ?? "#000";
-  ctx.fillRect(x * ts, y * ts, ts, ts);
-  if (type === "wall") {
-    ctx.strokeStyle = "#2a2a3a";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(x * ts + 0.5, y * ts + 0.5, ts - 1, ts - 1);
-  } else if (type === "water") {
-    ctx.strokeStyle = "rgba(255,255,255,0.18)";
-    ctx.beginPath();
-    ctx.moveTo(x * ts + ts * 0.2, y * ts + ts * 0.55);
-    ctx.quadraticCurveTo(
-      x * ts + ts * 0.5,
-      y * ts + ts * 0.4,
-      x * ts + ts * 0.8,
-      y * ts + ts * 0.55
-    );
-    ctx.stroke();
-  } else if (type === "lava") {
-    ctx.fillStyle = "rgba(255,210,80,0.4)";
-    ctx.beginPath();
-    ctx.arc(
-      x * ts + ts * 0.5,
-      y * ts + ts * 0.5,
-      ts * 0.15,
-      0,
-      Math.PI * 2
-    );
-    ctx.fill();
+  const px = x * ts, py = y * ts;
+  ctx.save();
+  switch (type) {
+    case "wall": {
+      // carved stone block with mortar lines
+      ctx.fillStyle = "#3f3a4a";
+      ctx.fillRect(px, py, ts, ts);
+      // brick pattern
+      ctx.fillStyle = "#52495e";
+      const half = (((x + y) % 2) === 0) ? 0 : ts * 0.5;
+      ctx.fillRect(px + half, py + ts * 0.05, ts * 0.45, ts * 0.4);
+      ctx.fillRect(px + (half === 0 ? ts * 0.5 : 0), py + ts * 0.5, ts * 0.45, ts * 0.4);
+      // dark mortar
+      ctx.strokeStyle = "#1a1626";
+      ctx.lineWidth = Math.max(1, ts * 0.04);
+      ctx.strokeRect(px + 0.5, py + 0.5, ts - 1, ts - 1);
+      // highlight top edge
+      ctx.strokeStyle = "rgba(255,255,255,0.12)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(px + 1, py + 1);
+      ctx.lineTo(px + ts - 1, py + 1);
+      ctx.stroke();
+      break;
+    }
+    case "water": {
+      // animated-looking water without animation
+      ctx.fillStyle = "#1a4e7e";
+      ctx.fillRect(px, py, ts, ts);
+      ctx.fillStyle = "#2a6da0";
+      ctx.fillRect(px, py + ts * 0.55, ts, ts * 0.45);
+      // ripples
+      ctx.strokeStyle = "rgba(255,255,255,0.22)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(px + ts * 0.15, py + ts * 0.45);
+      ctx.quadraticCurveTo(px + ts * 0.5, py + ts * 0.3, px + ts * 0.85, py + ts * 0.45);
+      ctx.moveTo(px + ts * 0.2, py + ts * 0.75);
+      ctx.quadraticCurveTo(px + ts * 0.5, py + ts * 0.6, px + ts * 0.8, py + ts * 0.75);
+      ctx.stroke();
+      break;
+    }
+    case "lava": {
+      // glowing molten
+      ctx.fillStyle = "#5a1004";
+      ctx.fillRect(px, py, ts, ts);
+      // hot center
+      const g = ctx.createRadialGradient(
+        px + ts * 0.5, py + ts * 0.5, ts * 0.05,
+        px + ts * 0.5, py + ts * 0.5, ts * 0.55
+      );
+      g.addColorStop(0, "#ffe066");
+      g.addColorStop(0.4, "#f06820");
+      g.addColorStop(1, "#5a1004");
+      ctx.fillStyle = g;
+      ctx.fillRect(px, py, ts, ts);
+      // crust cracks
+      ctx.strokeStyle = "#2a0805";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(px + 2, py + ts * 0.2);
+      ctx.lineTo(px + ts * 0.4, py + ts * 0.5);
+      ctx.lineTo(px + ts - 2, py + ts * 0.3);
+      ctx.stroke();
+      break;
+    }
+    case "void": {
+      // deep pit
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(px, py, ts, ts);
+      const g = ctx.createRadialGradient(
+        px + ts * 0.5, py + ts * 0.5, 0,
+        px + ts * 0.5, py + ts * 0.5, ts * 0.55
+      );
+      g.addColorStop(0, "#000");
+      g.addColorStop(0.6, "#0a0a14");
+      g.addColorStop(1, "#1a1a2a");
+      ctx.fillStyle = g;
+      ctx.fillRect(px, py, ts, ts);
+      break;
+    }
+    case "road": {
+      // cobblestone (fallback if sprite missing)
+      ctx.fillStyle = "#a89070";
+      ctx.fillRect(px, py, ts, ts);
+      ctx.fillStyle = "#bca080";
+      const seed = ((x * 73 + y * 19) >>> 0);
+      for (let i = 0; i < 4; i++) {
+        const sx = px + ((seed >> (i * 3)) & 7) * (ts / 8);
+        const sy = py + ((seed >> (i * 3 + 1)) & 7) * (ts / 8);
+        ctx.beginPath();
+        ctx.arc(sx, sy, ts * 0.08, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.strokeStyle = "rgba(60,40,20,0.4)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(px + 0.5, py + 0.5, ts - 1, ts - 1);
+      break;
+    }
+    case "forest": {
+      // tree canopy (fallback)
+      ctx.fillStyle = "#2d5a27";
+      ctx.fillRect(px, py, ts, ts);
+      ctx.fillStyle = "#3d7034";
+      ctx.beginPath();
+      ctx.arc(px + ts * 0.5, py + ts * 0.5, ts * 0.35, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    }
   }
+  ctx.restore();
 }
 
+/**
+ * Stylized procedural fallbacks designed to visually pair with the Kenney
+ * RPG-pack sprites (saturated colors, dark outlines, slight 3/4 view).
+ */
 function proceduralObject(
   ctx: CanvasRenderingContext2D,
   o: MapObject,
@@ -492,113 +578,289 @@ function proceduralObject(
   const py = o.y * ts;
   const cx = px + ts / 2;
   const cy = py + ts / 2;
-  const pad = ts * 0.18;
+  const OUTLINE = "#2a1a08";
   ctx.save();
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
   switch (o.type as ObjectType) {
     case "chest": {
-      ctx.fillStyle = "#6b4a25";
-      ctx.fillRect(px + pad, py + ts * 0.4, ts - pad * 2, ts * 0.45);
-      ctx.fillStyle = "#caa84a";
-      ctx.fillRect(px + pad, py + ts * 0.55, ts - pad * 2, ts * 0.06);
-      ctx.strokeStyle = "#2a1a05";
-      ctx.lineWidth = 1;
-      ctx.strokeRect(
-        px + pad + 0.5,
-        py + ts * 0.4 + 0.5,
-        ts - pad * 2 - 1,
-        ts * 0.45 - 1
-      );
+      // base box
+      const w = ts * 0.66, h = ts * 0.36;
+      const bx = cx - w / 2, by = cy + ts * 0.04;
+      ctx.fillStyle = "#7a4a1c";
+      ctx.fillRect(bx, by, w, h);
+      // lid
+      ctx.fillStyle = "#9c5d24";
+      ctx.beginPath();
+      ctx.ellipse(cx, by, w / 2, h * 0.45, 0, Math.PI, 0);
+      ctx.fill();
+      // gold bands
+      ctx.fillStyle = "#e0b04a";
+      ctx.fillRect(bx, by + h * 0.25, w, h * 0.12);
+      ctx.fillRect(bx, by + h * 0.75, w, h * 0.12);
+      // lock
+      ctx.fillStyle = "#f1c668";
+      ctx.fillRect(cx - ts * 0.06, by + h * 0.4, ts * 0.12, h * 0.35);
+      ctx.fillStyle = OUTLINE;
+      ctx.fillRect(cx - ts * 0.02, by + h * 0.5, ts * 0.04, ts * 0.04);
+      // outline
+      ctx.strokeStyle = OUTLINE;
+      ctx.lineWidth = Math.max(1, ts * 0.04);
+      ctx.strokeRect(bx, by, w, h);
+      ctx.beginPath();
+      ctx.ellipse(cx, by, w / 2, h * 0.45, 0, Math.PI, 0);
+      ctx.stroke();
       break;
     }
     case "door": {
-      ctx.fillStyle = "#5a3a1a";
-      ctx.fillRect(px + pad, py + pad, ts - pad * 2, ts - pad * 1.4);
-      ctx.fillStyle = "#caa84a";
+      // wooden door, top-down view (rectangle with handle)
+      const w = ts * 0.7, h = ts * 0.66;
+      const bx = cx - w / 2, by = cy - h / 2;
+      ctx.fillStyle = "#6b4423";
+      ctx.fillRect(bx, by, w, h);
+      // wood planks
+      ctx.strokeStyle = "#3f2812";
+      ctx.lineWidth = 1;
+      for (let i = 1; i < 3; i++) {
+        ctx.beginPath();
+        ctx.moveTo(bx + (w / 3) * i, by + 2);
+        ctx.lineTo(bx + (w / 3) * i, by + h - 2);
+        ctx.stroke();
+      }
+      // handle
+      ctx.fillStyle = "#e0b04a";
       ctx.beginPath();
-      ctx.arc(px + ts * 0.72, cy, ts * 0.05, 0, Math.PI * 2);
+      ctx.arc(bx + w * 0.82, cy, ts * 0.05, 0, Math.PI * 2);
       ctx.fill();
+      // outline
+      ctx.strokeStyle = OUTLINE;
+      ctx.lineWidth = Math.max(1, ts * 0.05);
+      ctx.strokeRect(bx, by, w, h);
       break;
     }
     case "pillar": {
-      ctx.fillStyle = "#a0a0b0";
+      const r = ts * 0.28;
+      // base
+      ctx.fillStyle = "#6f6a82";
       ctx.beginPath();
-      ctx.arc(cx, cy, ts * 0.3, 0, Math.PI * 2);
+      ctx.ellipse(cx, cy + ts * 0.18, r * 1.05, r * 0.35, 0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = "#5a5a70";
+      // column
+      ctx.fillStyle = "#a8a3bd";
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, r, r, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // top highlight
+      ctx.fillStyle = "#c9c4dc";
+      ctx.beginPath();
+      ctx.arc(cx - r * 0.25, cy - r * 0.25, r * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+      // outline
+      ctx.strokeStyle = OUTLINE;
+      ctx.lineWidth = Math.max(1, ts * 0.04);
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.stroke();
       break;
     }
     case "trap": {
-      ctx.strokeStyle = "#cc4400";
-      ctx.lineWidth = 3;
+      // floor plate with X spikes
+      ctx.fillStyle = "#3d3024";
       ctx.beginPath();
-      ctx.moveTo(px + pad, py + pad);
-      ctx.lineTo(px + ts - pad, py + ts - pad);
-      ctx.moveTo(px + ts - pad, py + pad);
-      ctx.lineTo(px + pad, py + ts - pad);
+      ctx.arc(cx, cy, ts * 0.32, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = OUTLINE;
+      ctx.lineWidth = Math.max(1, ts * 0.04);
       ctx.stroke();
-      break;
-    }
-    case "altar": {
-      ctx.fillStyle = "#b0a070";
-      ctx.fillRect(px + pad, py + ts * 0.45, ts - pad * 2, ts * 0.4);
-      ctx.fillStyle = "#e8d68a";
-      ctx.fillRect(px + pad, py + ts * 0.4, ts - pad * 2, ts * 0.08);
-      break;
-    }
-    case "table": {
-      ctx.fillStyle = "#7a5a35";
-      ctx.fillRect(px + pad * 0.5, py + ts * 0.4, ts - pad, ts * 0.2);
-      ctx.fillRect(px + pad, py + ts * 0.6, ts * 0.1, ts * 0.25);
-      ctx.fillRect(
-        px + ts - pad - ts * 0.1,
-        py + ts * 0.6,
-        ts * 0.1,
-        ts * 0.25
-      );
-      break;
-    }
-    case "barrel": {
-      ctx.fillStyle = "#6b4a25";
+      // spike X
+      ctx.strokeStyle = "#c43a1a";
+      ctx.lineWidth = Math.max(2, ts * 0.06);
       ctx.beginPath();
-      ctx.ellipse(cx, cy, ts * 0.25, ts * 0.3, 0, 0, Math.PI * 2);
+      ctx.moveTo(cx - ts * 0.18, cy - ts * 0.18);
+      ctx.lineTo(cx + ts * 0.18, cy + ts * 0.18);
+      ctx.moveTo(cx + ts * 0.18, cy - ts * 0.18);
+      ctx.lineTo(cx - ts * 0.18, cy + ts * 0.18);
+      ctx.stroke();
+      // center spike
+      ctx.fillStyle = "#e8b54a";
+      ctx.beginPath();
+      ctx.arc(cx, cy, ts * 0.06, 0, Math.PI * 2);
       ctx.fill();
       break;
     }
+    case "altar": {
+      const w = ts * 0.62, h = ts * 0.38;
+      const bx = cx - w / 2, by = cy - h / 2;
+      // body
+      ctx.fillStyle = "#7d756a";
+      ctx.fillRect(bx, by + h * 0.25, w, h * 0.75);
+      // top slab
+      ctx.fillStyle = "#bcb3a3";
+      ctx.fillRect(bx - 2, by, w + 4, h * 0.3);
+      // glowing rune
+      ctx.fillStyle = "#f0c14a";
+      ctx.beginPath();
+      ctx.arc(cx, by + h * 0.15, ts * 0.06, 0, Math.PI * 2);
+      ctx.fill();
+      // outline
+      ctx.strokeStyle = OUTLINE;
+      ctx.lineWidth = Math.max(1, ts * 0.05);
+      ctx.strokeRect(bx, by + h * 0.25, w, h * 0.75);
+      ctx.strokeRect(bx - 2, by, w + 4, h * 0.3);
+      break;
+    }
+    case "table": {
+      // wooden round table top-down
+      const r = ts * 0.32;
+      ctx.fillStyle = "#7a4a23";
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fill();
+      // planks
+      ctx.strokeStyle = "#4a2a10";
+      ctx.lineWidth = 1;
+      for (let i = -1; i <= 1; i++) {
+        const off = i * (r * 0.45);
+        ctx.beginPath();
+        ctx.moveTo(cx + off, cy - r * 0.9);
+        ctx.lineTo(cx + off, cy + r * 0.9);
+        ctx.stroke();
+      }
+      // outline
+      ctx.strokeStyle = OUTLINE;
+      ctx.lineWidth = Math.max(1, ts * 0.05);
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.stroke();
+      // tiny food/cup
+      ctx.fillStyle = "#d9b46a";
+      ctx.beginPath();
+      ctx.arc(cx - r * 0.3, cy - r * 0.1, ts * 0.05, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#a04030";
+      ctx.beginPath();
+      ctx.arc(cx + r * 0.3, cy + r * 0.15, ts * 0.04, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    }
+    case "barrel": {
+      const r = ts * 0.26;
+      // body
+      ctx.fillStyle = "#7a4a23";
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, r, r * 1.05, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // iron bands
+      ctx.strokeStyle = "#4a3a2a";
+      ctx.lineWidth = Math.max(2, ts * 0.04);
+      ctx.beginPath();
+      ctx.ellipse(cx, cy - r * 0.4, r * 0.95, r * 0.18, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.ellipse(cx, cy + r * 0.4, r * 0.95, r * 0.18, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      // top lid
+      ctx.fillStyle = "#9c5d2c";
+      ctx.beginPath();
+      ctx.ellipse(cx, cy - r * 0.65, r * 0.9, r * 0.3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // outline
+      ctx.strokeStyle = OUTLINE;
+      ctx.lineWidth = Math.max(1, ts * 0.04);
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, r, r * 1.05, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      break;
+    }
     case "tree": {
-      ctx.fillStyle = "#5a3a1a";
-      ctx.fillRect(cx - ts * 0.06, cy + ts * 0.05, ts * 0.12, ts * 0.3);
+      // trunk
+      ctx.fillStyle = "#5a3814";
+      ctx.fillRect(cx - ts * 0.06, cy + ts * 0.05, ts * 0.12, ts * 0.28);
+      ctx.strokeStyle = OUTLINE;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(cx - ts * 0.06, cy + ts * 0.05, ts * 0.12, ts * 0.28);
+      // canopy: 3 stacked circles
       ctx.fillStyle = "#2d5a27";
       ctx.beginPath();
       ctx.arc(cx, cy - ts * 0.05, ts * 0.32, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = "#3d7034";
       ctx.beginPath();
-      ctx.arc(cx - ts * 0.1, cy - ts * 0.15, ts * 0.2, 0, Math.PI * 2);
+      ctx.arc(cx - ts * 0.1, cy - ts * 0.15, ts * 0.22, 0, Math.PI * 2);
       ctx.fill();
+      ctx.fillStyle = "#4d8a40";
+      ctx.beginPath();
+      ctx.arc(cx + ts * 0.08, cy - ts * 0.18, ts * 0.18, 0, Math.PI * 2);
+      ctx.fill();
+      // outline
+      ctx.strokeStyle = OUTLINE;
+      ctx.lineWidth = Math.max(1, ts * 0.04);
+      ctx.beginPath();
+      ctx.arc(cx, cy - ts * 0.05, ts * 0.32, 0, Math.PI * 2);
+      ctx.stroke();
       break;
     }
     case "house": {
-      ctx.fillStyle = "#8b6c42";
-      ctx.fillRect(px + pad, py + ts * 0.45, ts - pad * 2, ts * 0.4);
-      ctx.fillStyle = "#5a3a1a";
+      const w = ts * 0.75, h = ts * 0.42;
+      const bx = cx - w / 2, by = cy - h / 2 + ts * 0.08;
+      // body
+      ctx.fillStyle = "#a37547";
+      ctx.fillRect(bx, by, w, h);
+      // roof
+      ctx.fillStyle = "#7c3a1e";
       ctx.beginPath();
-      ctx.moveTo(px + pad * 0.5, py + ts * 0.45);
-      ctx.lineTo(cx, py + pad);
-      ctx.lineTo(px + ts - pad * 0.5, py + ts * 0.45);
+      ctx.moveTo(bx - 4, by);
+      ctx.lineTo(cx, by - ts * 0.28);
+      ctx.lineTo(bx + w + 4, by);
       ctx.closePath();
       ctx.fill();
+      // door
+      ctx.fillStyle = "#3f240e";
+      ctx.fillRect(cx - ts * 0.08, by + h * 0.4, ts * 0.16, h * 0.6);
+      // window
+      ctx.fillStyle = "#f0c14a";
+      ctx.fillRect(bx + w * 0.18, by + h * 0.25, ts * 0.1, ts * 0.1);
+      // outline
+      ctx.strokeStyle = OUTLINE;
+      ctx.lineWidth = Math.max(1, ts * 0.05);
+      ctx.strokeRect(bx, by, w, h);
+      ctx.beginPath();
+      ctx.moveTo(bx - 4, by);
+      ctx.lineTo(cx, by - ts * 0.28);
+      ctx.lineTo(bx + w + 4, by);
+      ctx.stroke();
       break;
     }
     case "well": {
-      ctx.fillStyle = "#5a5a70";
+      // outer stone ring
+      ctx.fillStyle = "#7a7588";
       ctx.beginPath();
-      ctx.arc(cx, cy, ts * 0.3, 0, Math.PI * 2);
+      ctx.arc(cx, cy, ts * 0.32, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = "#1a2a40";
+      // inner water
+      ctx.fillStyle = "#1f4a7a";
       ctx.beginPath();
-      ctx.arc(cx, cy, ts * 0.2, 0, Math.PI * 2);
+      ctx.arc(cx, cy, ts * 0.22, 0, Math.PI * 2);
       ctx.fill();
+      // water shimmer
+      ctx.strokeStyle = "rgba(255,255,255,0.45)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(cx, cy + ts * 0.04, ts * 0.14, 0.2, Math.PI - 0.2);
+      ctx.stroke();
+      // outline
+      ctx.strokeStyle = OUTLINE;
+      ctx.lineWidth = Math.max(1, ts * 0.04);
+      ctx.beginPath();
+      ctx.arc(cx, cy, ts * 0.32, 0, Math.PI * 2);
+      ctx.stroke();
+      // stone segments
+      ctx.beginPath();
+      for (let a = 0; a < Math.PI * 2; a += Math.PI / 4) {
+        ctx.moveTo(cx + Math.cos(a) * ts * 0.22, cy + Math.sin(a) * ts * 0.22);
+        ctx.lineTo(cx + Math.cos(a) * ts * 0.32, cy + Math.sin(a) * ts * 0.32);
+      }
+      ctx.stroke();
       break;
     }
     default: {
