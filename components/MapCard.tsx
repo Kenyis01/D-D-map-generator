@@ -31,7 +31,7 @@ export default function MapCard({ map, onDeleted, onUpdated }: Props) {
   }
 
   async function handleDownload() {
-    const canvas = renderToExportCanvas(map.map_data, 64);
+    const canvas = await renderToExportCanvas(map.map_data, 64);
     const url = canvas.toDataURL("image/png");
     const a = document.createElement("a");
     a.href = url;

@@ -32,14 +32,15 @@ const SCHEMA_DESCRIPTION = `Return ONLY a single valid JSON object (no markdown,
 
 Rules:
 - All coordinates must be inside the grid (0 <= x < width, 0 <= y < height).
-- Rooms must NOT overlap; w >= 2, h >= 2; fit inside the grid.
+- Rooms must NOT overlap; w >= 3, h >= 3; fit inside the grid with at least 1 tile margin from the edges.
 - Every connection references existing room ids.
-- 3 to 10 rooms typical. Place at least 5-20 objects to make it visually rich.
-- For dungeons: use stone_floor background and add walls around rooms.
-- For overworld: use grass background, add forest/road/water special tiles, trees and houses.
-- For towns: use dirt background, add houses, wells, roads.
-- For interior: use wood_floor background, add tables, barrels.
-- The "label" should describe the room (e.g. "Throne Room", "Treasury").
+- 4 to 8 rooms total. Mix room sizes (some small chambers 3x3, one or two big halls 6x5).
+- Place 15-35 objects total — the map must feel populated and lived-in. Cluster them logically: chests near treasure rooms, tables/barrels in tavern/shop, pillars in chambers and boss rooms, trees in forest tiles.
+- For dungeon: stone_floor background. Surround each room with wall special_tiles (one tile thick perimeter). Add 4-8 pillars in big chambers. 2-3 chests in treasure/boss rooms. 1-2 altars in boss/chamber rooms. A few traps in corridors.
+- For overworld: grass background. Add forest patches (clusters of forest special_tiles), road special_tiles connecting locations, a small water body. Place 6-12 trees, 2-4 houses, 1-2 wells.
+- For town: dirt background. Add road tiles connecting buildings. Place 4-8 houses, 2-3 wells, 4-6 barrels, 2-3 tables outside.
+- For interior: wood_floor background. Walls around rooms. Place 3-5 tables, 5-10 barrels, 2-4 chests, 2-4 pillars.
+- "label" should be evocative (e.g. "Throne Room", "Treasury", "Tavern Hall", "Crypt of the Forgotten").
 - Output ONLY the JSON object.`;
 
 export async function generateMapJson(opts: {

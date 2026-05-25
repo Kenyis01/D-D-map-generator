@@ -39,7 +39,27 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </header>
           <main className="mx-auto max-w-7xl px-4 py-8">{children}</main>
           <footer className="border-t border-border py-6 text-center text-xs text-muted">
-            Built with Next.js · Supabase · Gemini Flash
+            <p>Built with Next.js · Supabase · Groq LLM</p>
+            <p className="mt-1">
+              Sprites:{" "}
+              <a
+                href="https://github.com/iwenzhou/kenney"
+                target="_blank"
+                rel="noreferrer"
+                className="underline hover:text-accent"
+              >
+                Kenney (CC0)
+              </a>
+              {" · "}
+              <a
+                href="https://github.com/ElizaWy/LPC"
+                target="_blank"
+                rel="noreferrer"
+                className="underline hover:text-accent"
+              >
+                Liberated Pixel Cup (CC-BY-SA 3.0)
+              </a>
+            </p>
           </footer>
         </div>
       </body>

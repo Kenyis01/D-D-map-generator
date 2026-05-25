@@ -50,7 +50,7 @@ export default function GeneratorForm() {
 
   async function downloadPng() {
     if (!map) return;
-    const canvas = canvasRef.current?.exportHiRes(64);
+    const canvas = await canvasRef.current?.exportHiRes(64);
     if (!canvas) return;
     const url = canvas.toDataURL("image/png");
     const a = document.createElement("a");
@@ -65,7 +65,7 @@ export default function GeneratorForm() {
     setError(null);
     setStatus(null);
     try {
-      const exportCanvas = canvasRef.current?.exportHiRes(48);
+      const exportCanvas = await canvasRef.current?.exportHiRes(48);
       let thumbnail_url: string | null = null;
       if (exportCanvas) {
         const blob: Blob | null = await new Promise((r) =>
