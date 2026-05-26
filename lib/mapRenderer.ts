@@ -13,7 +13,7 @@ import type {
 } from "./types";
 
 // ============================================================
-// Fallback color palette (used when a sprite is unavailable).
+// Palette (fallbacks when no sprite is available)
 // ============================================================
 const TILE_COLORS: Record<BackgroundTile | SpecialTileType, string> = {
   stone_floor: "#3a3a4a",
@@ -29,25 +29,25 @@ const TILE_COLORS: Record<BackgroundTile | SpecialTileType, string> = {
 };
 
 const ROOM_TINT: Record<RoomType, string> = {
-  entrance: "rgba(120,120,160,0.20)",
+  entrance: "rgba(120,120,160,0.22)",
   corridor: "rgba(60,60,90,0.18)",
-  chamber: "rgba(110,100,150,0.18)",
-  boss: "rgba(180,70,70,0.30)",
-  treasure: "rgba(220,180,80,0.30)",
-  shop: "rgba(140,120,70,0.28)",
-  tavern: "rgba(180,140,80,0.30)",
-  open: "rgba(140,110,70,0.22)"
+  chamber: "rgba(110,100,150,0.20)",
+  boss: "rgba(180,70,70,0.32)",
+  treasure: "rgba(220,180,80,0.32)",
+  shop: "rgba(140,120,70,0.30)",
+  tavern: "rgba(180,140,80,0.32)",
+  open: "rgba(140,110,70,0.24)"
 };
 
-const ROOM_EDGE: Record<RoomType, string> = {
+const ROOM_BADGE_COLOR: Record<RoomType, string> = {
   entrance: "#a8a8c0",
-  corridor: "#666688",
-  chamber: "#8c8cb0",
-  boss: "#c25555",
-  treasure: "#e0b860",
-  shop: "#b5965c",
-  tavern: "#c89e60",
-  open: "#b59067"
+  corridor: "#888",
+  chamber: "#c0c0e0",
+  boss: "#e26060",
+  treasure: "#f0c14a",
+  shop: "#c8a868",
+  tavern: "#d8a060",
+  open: "#c0a070"
 };
 
 // ============================================================
@@ -58,7 +58,8 @@ interface RenderOptions {
   pixelRatio?: number;
   tileSize?: number;
   showGrid?: boolean;
-  showLabels?: boolean;
+  /** Draw room number badges */
+  showBadges?: boolean;
 }
 
 export function computeTileSize(
@@ -70,16 +71,10 @@ export function computeTileSize(
   return Math.floor(Math.min(canvasWidth / mapWidth, canvasHeight / mapHeight));
 }
 
-/** Eagerly load all sprite URLs into the browser cache. Safe to call repeatedly. */
 export function warmSpriteCache() {
   prefetch(allSpriteUrls());
 }
 
-/**
- * Render the map to a visible canvas. Sprites are loaded asynchronously; the
- * function returns after the first synchronous pass (with whatever sprites are
- * already cached) and triggers a repaint when all images finish loading.
- */
 export function renderMap(
   canvas: HTMLCanvasElement,
   map: MapData,
@@ -104,21 +99,18 @@ export function renderMap(
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.imageSmoothingEnabled = false;
 
-  paint(ctx, map, tileSize, opts.showGrid ?? true, opts.showLabels ?? true);
+  const computed = computeLayers(map);
+  paint(ctx, map, tileSize, computed, opts.showGrid ?? true, opts.showBadges ?? true);
 
-  // re-paint once all needed sprites have loaded
   Promise.all(allSpriteUrls().map(loadSprite)).then(() => {
     const ctx2 = canvas.getContext("2d");
     if (!ctx2) return;
     ctx2.setTransform(dpr, 0, 0, dpr, 0, 0);
-    paint(ctx2, map, tileSize, opts.showGrid ?? true, opts.showLabels ?? true);
+    ctx2.imageSmoothingEnabled = false;
+    paint(ctx2, map, tileSize, computed, opts.showGrid ?? true, opts.showBadges ?? true);
   });
 }
 
-/**
- * Build a high-resolution offscreen canvas suitable for PNG export.
- * Async — waits for all sprites to load before painting.
- */
 export async function renderToExportCanvas(
   map: MapData,
   tileSize = 64
@@ -131,8 +123,114 @@ export async function renderToExportCanvas(
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.imageSmoothingEnabled = false;
   await Promise.all(allSpriteUrls().map(loadSprite));
-  paint(ctx, map, tileSize, true, true);
+  const computed = computeLayers(map);
+  paint(ctx, map, tileSize, computed, true, true);
   return canvas;
+}
+
+// ============================================================
+// Compute layers: interior tiles (rooms + corridors) + walls
+// ============================================================
+
+interface ComputedLayers {
+  interior: Uint8Array;          // 1 = walkable
+  corridor: Uint8Array;          // 1 = corridor tile
+  roomIndex: Int16Array;         // index of room owning this tile, -1 if none
+  walls: { x: number; y: number }[];
+}
+
+function computeLayers(map: MapData): ComputedLayers {
+  const W = map.width, H = map.height;
+  const interior = new Uint8Array(W * H);
+  const corridor = new Uint8Array(W * H);
+  const roomIndex = new Int16Array(W * H).fill(-1);
+  const idx = (x: number, y: number) => y * W + x;
+  const inBounds = (x: number, y: number) =>
+    x >= 0 && y >= 0 && x < W && y < H;
+
+  // Mark room tiles
+  map.rooms.forEach((r, i) => {
+    for (let y = r.y; y < r.y + r.h; y++) {
+      for (let x = r.x; x < r.x + r.w; x++) {
+        if (inBounds(x, y)) {
+          interior[idx(x, y)] = 1;
+          roomIndex[idx(x, y)] = i;
+        }
+      }
+    }
+  });
+
+  // Build corridor tiles between connected rooms (L-shape paths)
+  const byId = new Map<string, MapRoom>();
+  for (const r of map.rooms) byId.set(r.id, r);
+
+  for (const c of map.connections) {
+    const a = byId.get(c.from);
+    const b = byId.get(c.to);
+    if (!a || !b) continue;
+    const ax = Math.floor(a.x + a.w / 2);
+    const ay = Math.floor(a.y + a.h / 2);
+    const bx = Math.floor(b.x + b.w / 2);
+    const by = Math.floor(b.y + b.h / 2);
+
+    // L-shape: horizontal first then vertical (deterministic)
+    const horizFirst = ((c.from + c.to).length & 1) === 0;
+    if (horizFirst) {
+      stampLine(ax, ay, bx, ay);
+      stampLine(bx, ay, bx, by);
+    } else {
+      stampLine(ax, ay, ax, by);
+      stampLine(ax, by, bx, by);
+    }
+  }
+
+  function stampLine(x1: number, y1: number, x2: number, y2: number) {
+    if (x1 === x2) {
+      const [a, b] = y1 < y2 ? [y1, y2] : [y2, y1];
+      for (let y = a; y <= b; y++) {
+        if (inBounds(x1, y)) {
+          const i = idx(x1, y);
+          if (!interior[i]) corridor[i] = 1;
+          interior[i] = 1;
+        }
+      }
+    } else if (y1 === y2) {
+      const [a, b] = x1 < x2 ? [x1, x2] : [x2, x1];
+      for (let x = a; x <= b; x++) {
+        if (inBounds(x, y1)) {
+          const i = idx(x, y1);
+          if (!interior[i]) corridor[i] = 1;
+          interior[i] = 1;
+        }
+      }
+    }
+  }
+
+  // Compute wall tiles = any non-interior tile orthogonally adjacent to an interior tile
+  const walls: { x: number; y: number }[] = [];
+  const wallSet = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (interior[idx(x, y)]) continue;
+      const i = idx(x, y);
+      const neighborInterior =
+        (x > 0 && interior[idx(x - 1, y)]) ||
+        (x < W - 1 && interior[idx(x + 1, y)]) ||
+        (y > 0 && interior[idx(x, y - 1)]) ||
+        (y < H - 1 && interior[idx(x, y + 1)]) ||
+        // include diagonals so corners get walled too
+        (x > 0 && y > 0 && interior[idx(x - 1, y - 1)]) ||
+        (x < W - 1 && y > 0 && interior[idx(x + 1, y - 1)]) ||
+        (x > 0 && y < H - 1 && interior[idx(x - 1, y + 1)]) ||
+        (x < W - 1 && y < H - 1 && interior[idx(x + 1, y + 1)]);
+      if (neighborInterior) {
+        wallSet[i] = 1;
+        walls.push({ x, y });
+      }
+    }
+  }
+
+  return { interior, corridor, roomIndex, walls };
 }
 
 // ============================================================
@@ -143,18 +241,20 @@ function paint(
   ctx: CanvasRenderingContext2D,
   map: MapData,
   ts: number,
+  layers: ComputedLayers,
   showGrid: boolean,
-  showLabels: boolean
+  showBadges: boolean
 ) {
   drawBackground(ctx, map, ts);
-  drawRoomFloors(ctx, map, ts);
-  drawSpecialTiles(ctx, map, ts);
-  drawWalls(ctx, map, ts);
-  drawConnections(ctx, map, ts);
+  drawSpecialTiles(ctx, map, ts, layers);
+  drawCorridorAndRoomFloors(ctx, map, ts, layers);
+  drawScatterDecoration(ctx, map, ts, layers);
+  drawRoomTint(ctx, map, ts);
+  drawWalls(ctx, map, ts, layers);
   drawObjects(ctx, map, ts);
   if (showGrid) drawGrid(ctx, map, ts);
   drawVignette(ctx, map, ts);
-  if (showLabels) drawLabels(ctx, map, ts);
+  if (showBadges) drawRoomBadges(ctx, map, ts);
 }
 
 function drawBackground(
@@ -162,15 +262,35 @@ function drawBackground(
   map: MapData,
   ts: number
 ) {
+  // Background = "outside" texture. For dungeons we want darkness (void),
+  // for overworld/town we want the terrain.
+  const isDungeon = map.map_type === "dungeon";
+  if (isDungeon) {
+    ctx.fillStyle = "#0a0a14";
+    ctx.fillRect(0, 0, ts * map.width, ts * map.height);
+    // subtle outer dust texture
+    ctx.save();
+    ctx.globalAlpha = 0.05;
+    for (let y = 0; y < map.height; y++) {
+      for (let x = 0; x < map.width; x++) {
+        if ((((x * 928371) ^ (y * 12831)) >>> 0) % 23 === 0) {
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(x * ts, y * ts, ts, ts);
+        }
+      }
+    }
+    ctx.restore();
+    return;
+  }
+  // For outdoor map types use the terrain everywhere as the base
   const variants = SPRITES.terrain[map.background_tile];
   if (variants && variants.length > 0) {
     for (let y = 0; y < map.height; y++) {
       for (let x = 0; x < map.width; x++) {
         const url = pickVariant(variants, x, y);
         const sprite = url ? getCachedSprite(url) : null;
-        if (sprite) {
-          ctx.drawImage(sprite, x * ts, y * ts, ts, ts);
-        } else {
+        if (sprite) ctx.drawImage(sprite, x * ts, y * ts, ts, ts);
+        else {
           ctx.fillStyle = TILE_COLORS[map.background_tile];
           ctx.fillRect(x * ts, y * ts, ts, ts);
         }
@@ -179,40 +299,18 @@ function drawBackground(
   } else {
     ctx.fillStyle = TILE_COLORS[map.background_tile] ?? "#3a3a4a";
     ctx.fillRect(0, 0, ts * map.width, ts * map.height);
-    proceduralNoise(ctx, map.width, map.height, ts);
-  }
-}
-
-function drawRoomFloors(
-  ctx: CanvasRenderingContext2D,
-  map: MapData,
-  ts: number
-) {
-  for (const r of map.rooms) {
-    const floorVariants = SPRITES.roomFloor[r.type];
-    if (floorVariants && floorVariants.length > 0) {
-      for (let y = 0; y < r.h; y++) {
-        for (let x = 0; x < r.w; x++) {
-          const url = pickVariant(floorVariants, r.x + x, r.y + y);
-          const sprite = url ? getCachedSprite(url) : null;
-          if (sprite) {
-            ctx.drawImage(sprite, (r.x + x) * ts, (r.y + y) * ts, ts, ts);
-          }
-        }
-      }
-    }
-    // Tint overlay (works on top of sprite or fallback color)
-    ctx.fillStyle = ROOM_TINT[r.type] ?? "rgba(0,0,0,0)";
-    ctx.fillRect(r.x * ts, r.y * ts, r.w * ts, r.h * ts);
   }
 }
 
 function drawSpecialTiles(
   ctx: CanvasRenderingContext2D,
   map: MapData,
-  ts: number
+  ts: number,
+  layers: ComputedLayers
 ) {
   for (const s of map.special_tiles) {
+    // skip wall tiles from the LLM — we compute walls ourselves now
+    if (s.type === "wall") continue;
     const variants = SPRITES.special[s.type];
     const url = variants ? pickVariant(variants, s.x, s.y) : undefined;
     const sprite = url ? getCachedSprite(url) : null;
@@ -224,112 +322,182 @@ function drawSpecialTiles(
   }
 }
 
-function drawWalls(ctx: CanvasRenderingContext2D, map: MapData, ts: number) {
-  ctx.save();
-  const t = Math.max(2, ts * 0.10);
-  for (const r of map.rooms) {
-    ctx.strokeStyle = ROOM_EDGE[r.type] ?? "#888";
-    ctx.lineWidth = t;
-    ctx.lineJoin = "round";
-    // outer shadow
-    ctx.shadowColor = "rgba(0,0,0,0.55)";
-    ctx.shadowBlur = ts * 0.25;
-    ctx.shadowOffsetY = ts * 0.05;
-    ctx.strokeRect(
-      r.x * ts + t / 2,
-      r.y * ts + t / 2,
-      r.w * ts - t,
-      r.h * ts - t
-    );
-    ctx.shadowBlur = 0;
-    ctx.shadowOffsetY = 0;
-    // inner thin dark line for "carved" feel
-    ctx.strokeStyle = "rgba(0,0,0,0.7)";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(
-      r.x * ts + t + 0.5,
-      r.y * ts + t + 0.5,
-      r.w * ts - 2 * t - 1,
-      r.h * ts - 2 * t - 1
-    );
+function drawCorridorAndRoomFloors(
+  ctx: CanvasRenderingContext2D,
+  map: MapData,
+  ts: number,
+  layers: ComputedLayers
+) {
+  const variants = SPRITES.terrain[map.background_tile];
+  for (let y = 0; y < map.height; y++) {
+    for (let x = 0; x < map.width; x++) {
+      const i = y * map.width + x;
+      if (!layers.interior[i]) continue;
+      const url = variants ? pickVariant(variants, x, y) : undefined;
+      const sprite = url ? getCachedSprite(url) : null;
+      if (sprite) {
+        ctx.drawImage(sprite, x * ts, y * ts, ts, ts);
+      } else {
+        ctx.fillStyle = TILE_COLORS[map.background_tile] ?? "#3a3a4a";
+        ctx.fillRect(x * ts, y * ts, ts, ts);
+      }
+    }
   }
-  ctx.restore();
 }
 
-function drawConnections(
+function drawScatterDecoration(
+  ctx: CanvasRenderingContext2D,
+  map: MapData,
+  ts: number,
+  layers: ComputedLayers
+) {
+  // Small marks on floor: cracks, moss, debris specks. Seeded by tile coord.
+  for (let y = 0; y < map.height; y++) {
+    for (let x = 0; x < map.width; x++) {
+      const i = y * map.width + x;
+      if (!layers.interior[i]) continue;
+      const seed = ((x * 1597) ^ (y * 51749)) >>> 0;
+      const kind = seed % 100;
+      ctx.save();
+      const px = x * ts, py = y * ts;
+      if (kind < 8) {
+        // crack
+        ctx.strokeStyle = "rgba(0,0,0,0.5)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        const sx = px + ((seed >> 4) % ts);
+        const sy = py + ((seed >> 8) % ts);
+        ctx.moveTo(sx, sy);
+        for (let k = 0; k < 3; k++) {
+          ctx.lineTo(
+            sx + (((seed >> (k * 3 + 5)) & 15) - 7) * (ts / 20),
+            sy + (((seed >> (k * 3 + 9)) & 15) - 7) * (ts / 20)
+          );
+        }
+        ctx.stroke();
+      } else if (kind < 14) {
+        // moss
+        ctx.fillStyle = "rgba(80,140,60,0.32)";
+        const mx = px + ((seed >> 6) % (ts - 8)) + 4;
+        const my = py + ((seed >> 10) % (ts - 8)) + 4;
+        ctx.beginPath();
+        ctx.arc(mx, my, ts * 0.12, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "rgba(40,90,30,0.32)";
+        ctx.beginPath();
+        ctx.arc(mx + ts * 0.08, my + ts * 0.05, ts * 0.08, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (kind < 18) {
+        // debris specks
+        ctx.fillStyle = "rgba(40,30,20,0.55)";
+        for (let k = 0; k < 4; k++) {
+          const dx = px + ((seed >> (k * 2 + 5)) & 31) * (ts / 32);
+          const dy = py + ((seed >> (k * 2 + 11)) & 31) * (ts / 32);
+          ctx.fillRect(dx, dy, 2, 2);
+        }
+      } else if (kind < 21) {
+        // dark stain (blood/water)
+        ctx.fillStyle = "rgba(60,15,15,0.25)";
+        const sx = px + ((seed >> 14) % (ts - 12)) + 6;
+        const sy = py + ((seed >> 16) % (ts - 12)) + 6;
+        ctx.beginPath();
+        ctx.ellipse(sx, sy, ts * 0.18, ts * 0.1, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+}
+
+function drawRoomTint(
   ctx: CanvasRenderingContext2D,
   map: MapData,
   ts: number
 ) {
-  const byId = new Map<string, MapRoom>();
-  for (const r of map.rooms) byId.set(r.id, r);
-
-  for (const c of map.connections) {
-    const a = byId.get(c.from);
-    const b = byId.get(c.to);
-    if (!a || !b) continue;
-    const ax = (a.x + a.w / 2) * ts;
-    const ay = (a.y + a.h / 2) * ts;
-    const bx = (b.x + b.w / 2) * ts;
-    const by = (b.y + b.h / 2) * ts;
-
-    ctx.save();
-    ctx.lineCap = "round";
-    // shadow under path
-    ctx.strokeStyle = "rgba(40,25,10,0.7)";
-    ctx.lineWidth = ts * 0.32;
-    ctx.beginPath();
-    ctx.moveTo(ax, ay);
-    ctx.lineTo(bx, by);
-    ctx.stroke();
-    // path body
-    switch (c.type) {
-      case "door":
-        ctx.strokeStyle = "#7a5a35";
-        break;
-      case "arch":
-        ctx.strokeStyle = "#a08a55";
-        break;
-      case "stairs":
-        ctx.strokeStyle = "#aa9050";
-        ctx.setLineDash([ts * 0.3, ts * 0.2]);
-        break;
-      case "path":
-        ctx.strokeStyle = "#c4a882";
-        break;
-    }
-    ctx.lineWidth = ts * 0.22;
-    ctx.beginPath();
-    ctx.moveTo(ax, ay);
-    ctx.lineTo(bx, by);
-    ctx.stroke();
-    // highlight
-    ctx.setLineDash([]);
-    ctx.strokeStyle = "rgba(255,230,170,0.35)";
-    ctx.lineWidth = ts * 0.08;
-    ctx.beginPath();
-    ctx.moveTo(ax, ay);
-    ctx.lineTo(bx, by);
-    ctx.stroke();
-    ctx.restore();
+  for (const r of map.rooms) {
+    ctx.fillStyle = ROOM_TINT[r.type] ?? "rgba(0,0,0,0)";
+    ctx.fillRect(r.x * ts, r.y * ts, r.w * ts, r.h * ts);
   }
+}
+
+function drawWalls(
+  ctx: CanvasRenderingContext2D,
+  map: MapData,
+  ts: number,
+  layers: ComputedLayers
+) {
+  for (const w of layers.walls) {
+    proceduralWallTile(ctx, w.x, w.y, ts);
+  }
+  // Inner edge shadow on walkable tiles adjacent to walls
+  ctx.save();
+  ctx.fillStyle = "rgba(0,0,0,0.35)";
+  for (let y = 0; y < map.height; y++) {
+    for (let x = 0; x < map.width; x++) {
+      const i = y * map.width + x;
+      if (!layers.interior[i]) continue;
+      // top wall shadow
+      if (y > 0 && !layers.interior[(y - 1) * map.width + x]) {
+        ctx.fillRect(x * ts, y * ts, ts, Math.max(2, ts * 0.08));
+      }
+      // left wall shadow
+      if (x > 0 && !layers.interior[y * map.width + (x - 1)]) {
+        ctx.fillRect(x * ts, y * ts, Math.max(2, ts * 0.08), ts);
+      }
+    }
+  }
+  ctx.restore();
+}
+
+function proceduralWallTile(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  ts: number
+) {
+  const px = x * ts, py = y * ts;
+  ctx.save();
+  // dark base
+  ctx.fillStyle = "#22202c";
+  ctx.fillRect(px, py, ts, ts);
+  // stone block pattern (offset every other row)
+  ctx.fillStyle = "#3d3a4a";
+  const rowOffset = (y & 1) === 0 ? 0 : ts * 0.5;
+  ctx.fillRect(px + rowOffset, py + ts * 0.05, ts * 0.46, ts * 0.40);
+  ctx.fillRect(px + (rowOffset === 0 ? ts * 0.5 : 0), py + ts * 0.55, ts * 0.46, ts * 0.40);
+  // mortar lines
+  ctx.strokeStyle = "#100c1a";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(px + rowOffset, py + ts * 0.05, ts * 0.46, ts * 0.40);
+  ctx.strokeRect(px + (rowOffset === 0 ? ts * 0.5 : 0), py + ts * 0.55, ts * 0.46, ts * 0.40);
+  // top highlight (light source from above)
+  ctx.strokeStyle = "rgba(255,255,255,0.10)";
+  ctx.beginPath();
+  ctx.moveTo(px + 1, py + ts * 0.06);
+  ctx.lineTo(px + rowOffset + ts * 0.46, py + ts * 0.06);
+  ctx.stroke();
+  // dark outline
+  ctx.strokeStyle = "#0a0814";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(px + 0.5, py + 0.5, ts - 1, ts - 1);
+  ctx.restore();
 }
 
 function drawObjects(ctx: CanvasRenderingContext2D, map: MapData, ts: number) {
   for (const o of map.objects) {
-    const variants = SPRITES.objects[o.type];
+    const variants = SPRITES.objects[o.type as ObjectType];
     const url = variants ? pickVariant(variants, o.x, o.y) : undefined;
     const sprite = url ? getCachedSprite(url) : null;
 
-    // shadow underneath (always — works for both sprite and fallback)
+    // shadow
     ctx.save();
     ctx.fillStyle = "rgba(0,0,0,0.45)";
     ctx.beginPath();
     ctx.ellipse(
       o.x * ts + ts / 2,
-      o.y * ts + ts * 0.78,
-      ts * 0.35,
-      ts * 0.13,
+      o.y * ts + ts * 0.80,
+      ts * 0.32,
+      ts * 0.10,
       0,
       0,
       Math.PI * 2
@@ -338,9 +506,8 @@ function drawObjects(ctx: CanvasRenderingContext2D, map: MapData, ts: number) {
     ctx.restore();
 
     if (sprite) {
-      // slight per-tile rotation for variation
-      const rot = ((((o.x * 31 + o.y * 17) >>> 0) % 21) - 10) * (Math.PI / 180);
-      const scale = 0.9 + (((o.x * 7 + o.y * 13) >>> 0) % 20) * 0.005;
+      const rot = ((((o.x * 31 + o.y * 17) >>> 0) % 13) - 6) * (Math.PI / 180);
+      const scale = 0.92 + (((o.x * 7 + o.y * 13) >>> 0) % 14) * 0.005;
       ctx.save();
       ctx.translate(o.x * ts + ts / 2, o.y * ts + ts / 2);
       ctx.rotate(rot);
@@ -353,9 +520,13 @@ function drawObjects(ctx: CanvasRenderingContext2D, map: MapData, ts: number) {
   }
 }
 
-function drawGrid(ctx: CanvasRenderingContext2D, map: MapData, ts: number) {
+function drawGrid(
+  ctx: CanvasRenderingContext2D,
+  map: MapData,
+  ts: number
+) {
   ctx.save();
-  ctx.strokeStyle = "rgba(0,0,0,0.32)";
+  ctx.strokeStyle = "rgba(0,0,0,0.30)";
   ctx.lineWidth = 1;
   for (let x = 0; x <= map.width; x++) {
     ctx.beginPath();
@@ -380,70 +551,58 @@ function drawVignette(
   const w = map.width * ts;
   const h = map.height * ts;
   const grad = ctx.createRadialGradient(
-    w / 2,
-    h / 2,
-    Math.min(w, h) * 0.35,
-    w / 2,
-    h / 2,
-    Math.max(w, h) * 0.75
+    w / 2, h / 2, Math.min(w, h) * 0.40,
+    w / 2, h / 2, Math.max(w, h) * 0.80
   );
   grad.addColorStop(0, "rgba(0,0,0,0)");
-  grad.addColorStop(1, "rgba(0,0,0,0.55)");
+  grad.addColorStop(1, "rgba(0,0,0,0.50)");
   ctx.save();
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, w, h);
-  // warm tint
-  ctx.fillStyle = "rgba(60,40,15,0.08)";
+  ctx.fillStyle = "rgba(60,40,15,0.05)";
   ctx.fillRect(0, 0, w, h);
   ctx.restore();
 }
 
-function drawLabels(
+function drawRoomBadges(
   ctx: CanvasRenderingContext2D,
   map: MapData,
   ts: number
 ) {
   ctx.save();
-  const fontSize = Math.max(12, Math.min(ts * 0.45, 22));
-  ctx.font = `700 ${fontSize}px Cinzel, Georgia, serif`;
+  const r = Math.max(10, Math.min(ts * 0.36, 18));
+  const fontSize = Math.max(11, r * 1.0);
+  ctx.font = `bold ${fontSize}px Inter, system-ui, sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  for (const r of map.rooms) {
-    if (!r.label) continue;
-    const cx = (r.x + r.w / 2) * ts;
-    const cy = (r.y + r.h / 2) * ts;
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = "rgba(0,0,0,0.85)";
-    ctx.strokeText(r.label, cx, cy);
-    ctx.fillStyle = "#f5dfa0";
-    ctx.fillText(r.label, cx, cy);
-  }
+  map.rooms.forEach((room, i) => {
+    const num = i + 1;
+    const bx = room.x * ts + r + 4;
+    const by = room.y * ts + r + 4;
+    // shadow
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.beginPath();
+    ctx.arc(bx + 1, by + 2, r, 0, Math.PI * 2);
+    ctx.fill();
+    // body
+    ctx.fillStyle = ROOM_BADGE_COLOR[room.type] ?? "#e0c870";
+    ctx.beginPath();
+    ctx.arc(bx, by, r, 0, Math.PI * 2);
+    ctx.fill();
+    // edge
+    ctx.strokeStyle = "rgba(0,0,0,0.7)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    // number
+    ctx.fillStyle = "#1a1626";
+    ctx.fillText(String(num), bx, by + 1);
+  });
   ctx.restore();
 }
 
 // ============================================================
-// Procedural fallbacks (used when sprite is missing)
+// Procedural object fallbacks
 // ============================================================
-
-function proceduralNoise(
-  ctx: CanvasRenderingContext2D,
-  w: number,
-  h: number,
-  ts: number
-) {
-  ctx.save();
-  ctx.globalAlpha = 0.08;
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const seed = (x * 928371 + y * 12831) % 11;
-      if (seed === 0) ctx.fillStyle = "#ffffff";
-      else if (seed === 3) ctx.fillStyle = "#000000";
-      else continue;
-      ctx.fillRect(x * ts, y * ts, ts, ts);
-    }
-  }
-  ctx.restore();
-}
 
 function proceduralSpecial(
   ctx: CanvasRenderingContext2D,
@@ -455,35 +614,11 @@ function proceduralSpecial(
   const px = x * ts, py = y * ts;
   ctx.save();
   switch (type) {
-    case "wall": {
-      // carved stone block with mortar lines
-      ctx.fillStyle = "#3f3a4a";
-      ctx.fillRect(px, py, ts, ts);
-      // brick pattern
-      ctx.fillStyle = "#52495e";
-      const half = (((x + y) % 2) === 0) ? 0 : ts * 0.5;
-      ctx.fillRect(px + half, py + ts * 0.05, ts * 0.45, ts * 0.4);
-      ctx.fillRect(px + (half === 0 ? ts * 0.5 : 0), py + ts * 0.5, ts * 0.45, ts * 0.4);
-      // dark mortar
-      ctx.strokeStyle = "#1a1626";
-      ctx.lineWidth = Math.max(1, ts * 0.04);
-      ctx.strokeRect(px + 0.5, py + 0.5, ts - 1, ts - 1);
-      // highlight top edge
-      ctx.strokeStyle = "rgba(255,255,255,0.12)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(px + 1, py + 1);
-      ctx.lineTo(px + ts - 1, py + 1);
-      ctx.stroke();
-      break;
-    }
     case "water": {
-      // animated-looking water without animation
       ctx.fillStyle = "#1a4e7e";
       ctx.fillRect(px, py, ts, ts);
       ctx.fillStyle = "#2a6da0";
       ctx.fillRect(px, py + ts * 0.55, ts, ts * 0.45);
-      // ripples
       ctx.strokeStyle = "rgba(255,255,255,0.22)";
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -495,10 +630,8 @@ function proceduralSpecial(
       break;
     }
     case "lava": {
-      // glowing molten
       ctx.fillStyle = "#5a1004";
       ctx.fillRect(px, py, ts, ts);
-      // hot center
       const g = ctx.createRadialGradient(
         px + ts * 0.5, py + ts * 0.5, ts * 0.05,
         px + ts * 0.5, py + ts * 0.5, ts * 0.55
@@ -508,7 +641,6 @@ function proceduralSpecial(
       g.addColorStop(1, "#5a1004");
       ctx.fillStyle = g;
       ctx.fillRect(px, py, ts, ts);
-      // crust cracks
       ctx.strokeStyle = "#2a0805";
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -519,8 +651,7 @@ function proceduralSpecial(
       break;
     }
     case "void": {
-      // deep pit
-      ctx.fillStyle = "#000000";
+      ctx.fillStyle = "#000";
       ctx.fillRect(px, py, ts, ts);
       const g = ctx.createRadialGradient(
         px + ts * 0.5, py + ts * 0.5, 0,
@@ -534,7 +665,6 @@ function proceduralSpecial(
       break;
     }
     case "road": {
-      // cobblestone (fallback if sprite missing)
       ctx.fillStyle = "#a89070";
       ctx.fillRect(px, py, ts, ts);
       ctx.fillStyle = "#bca080";
@@ -547,12 +677,10 @@ function proceduralSpecial(
         ctx.fill();
       }
       ctx.strokeStyle = "rgba(60,40,20,0.4)";
-      ctx.lineWidth = 1;
       ctx.strokeRect(px + 0.5, py + 0.5, ts - 1, ts - 1);
       break;
     }
     case "forest": {
-      // tree canopy (fallback)
       ctx.fillStyle = "#2d5a27";
       ctx.fillRect(px, py, ts, ts);
       ctx.fillStyle = "#3d7034";
@@ -561,14 +689,15 @@ function proceduralSpecial(
       ctx.fill();
       break;
     }
+    case "wall": {
+      // shouldn't be called now (we skip wall special_tiles); kept for safety
+      proceduralWallTile(ctx, x, y, ts);
+      break;
+    }
   }
   ctx.restore();
 }
 
-/**
- * Stylized procedural fallbacks designed to visually pair with the Kenney
- * RPG-pack sprites (saturated colors, dark outlines, slight 3/4 view).
- */
 function proceduralObject(
   ctx: CanvasRenderingContext2D,
   o: MapObject,
@@ -578,34 +707,29 @@ function proceduralObject(
   const py = o.y * ts;
   const cx = px + ts / 2;
   const cy = py + ts / 2;
-  const OUTLINE = "#2a1a08";
+  const OUTLINE = "#1a1208";
   ctx.save();
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
+  const stroke = (w = 1) => {
+    ctx.strokeStyle = OUTLINE;
+    ctx.lineWidth = Math.max(1, ts * (0.03 * w));
+  };
   switch (o.type as ObjectType) {
     case "chest": {
-      // base box
       const w = ts * 0.66, h = ts * 0.36;
       const bx = cx - w / 2, by = cy + ts * 0.04;
       ctx.fillStyle = "#7a4a1c";
       ctx.fillRect(bx, by, w, h);
-      // lid
       ctx.fillStyle = "#9c5d24";
       ctx.beginPath();
       ctx.ellipse(cx, by, w / 2, h * 0.45, 0, Math.PI, 0);
       ctx.fill();
-      // gold bands
       ctx.fillStyle = "#e0b04a";
       ctx.fillRect(bx, by + h * 0.25, w, h * 0.12);
-      ctx.fillRect(bx, by + h * 0.75, w, h * 0.12);
-      // lock
       ctx.fillStyle = "#f1c668";
       ctx.fillRect(cx - ts * 0.06, by + h * 0.4, ts * 0.12, h * 0.35);
-      ctx.fillStyle = OUTLINE;
-      ctx.fillRect(cx - ts * 0.02, by + h * 0.5, ts * 0.04, ts * 0.04);
-      // outline
-      ctx.strokeStyle = OUTLINE;
-      ctx.lineWidth = Math.max(1, ts * 0.04);
+      stroke(1.4);
       ctx.strokeRect(bx, by, w, h);
       ctx.beginPath();
       ctx.ellipse(cx, by, w / 2, h * 0.45, 0, Math.PI, 0);
@@ -613,12 +737,10 @@ function proceduralObject(
       break;
     }
     case "door": {
-      // wooden door, top-down view (rectangle with handle)
       const w = ts * 0.7, h = ts * 0.66;
       const bx = cx - w / 2, by = cy - h / 2;
       ctx.fillStyle = "#6b4423";
       ctx.fillRect(bx, by, w, h);
-      // wood planks
       ctx.strokeStyle = "#3f2812";
       ctx.lineWidth = 1;
       for (let i = 1; i < 3; i++) {
@@ -627,52 +749,41 @@ function proceduralObject(
         ctx.lineTo(bx + (w / 3) * i, by + h - 2);
         ctx.stroke();
       }
-      // handle
       ctx.fillStyle = "#e0b04a";
       ctx.beginPath();
       ctx.arc(bx + w * 0.82, cy, ts * 0.05, 0, Math.PI * 2);
       ctx.fill();
-      // outline
-      ctx.strokeStyle = OUTLINE;
-      ctx.lineWidth = Math.max(1, ts * 0.05);
+      stroke(1.6);
       ctx.strokeRect(bx, by, w, h);
       break;
     }
     case "pillar": {
-      const r = ts * 0.28;
-      // base
+      const r = ts * 0.30;
       ctx.fillStyle = "#6f6a82";
       ctx.beginPath();
       ctx.ellipse(cx, cy + ts * 0.18, r * 1.05, r * 0.35, 0, 0, Math.PI * 2);
       ctx.fill();
-      // column
       ctx.fillStyle = "#a8a3bd";
       ctx.beginPath();
-      ctx.ellipse(cx, cy, r, r, 0, 0, Math.PI * 2);
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.fill();
-      // top highlight
       ctx.fillStyle = "#c9c4dc";
       ctx.beginPath();
       ctx.arc(cx - r * 0.25, cy - r * 0.25, r * 0.4, 0, Math.PI * 2);
       ctx.fill();
-      // outline
-      ctx.strokeStyle = OUTLINE;
-      ctx.lineWidth = Math.max(1, ts * 0.04);
+      stroke(1.4);
       ctx.beginPath();
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.stroke();
       break;
     }
     case "trap": {
-      // floor plate with X spikes
       ctx.fillStyle = "#3d3024";
       ctx.beginPath();
       ctx.arc(cx, cy, ts * 0.32, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = OUTLINE;
-      ctx.lineWidth = Math.max(1, ts * 0.04);
+      stroke(1.4);
       ctx.stroke();
-      // spike X
       ctx.strokeStyle = "#c43a1a";
       ctx.lineWidth = Math.max(2, ts * 0.06);
       ctx.beginPath();
@@ -681,7 +792,6 @@ function proceduralObject(
       ctx.moveTo(cx + ts * 0.18, cy - ts * 0.18);
       ctx.lineTo(cx - ts * 0.18, cy + ts * 0.18);
       ctx.stroke();
-      // center spike
       ctx.fillStyle = "#e8b54a";
       ctx.beginPath();
       ctx.arc(cx, cy, ts * 0.06, 0, Math.PI * 2);
@@ -689,34 +799,35 @@ function proceduralObject(
       break;
     }
     case "altar": {
-      const w = ts * 0.62, h = ts * 0.38;
+      const w = ts * 0.62, h = ts * 0.42;
       const bx = cx - w / 2, by = cy - h / 2;
-      // body
       ctx.fillStyle = "#7d756a";
       ctx.fillRect(bx, by + h * 0.25, w, h * 0.75);
-      // top slab
       ctx.fillStyle = "#bcb3a3";
       ctx.fillRect(bx - 2, by, w + 4, h * 0.3);
       // glowing rune
+      const g = ctx.createRadialGradient(cx, by + h * 0.18, 0, cx, by + h * 0.18, ts * 0.22);
+      g.addColorStop(0, "rgba(255,210,120,1)");
+      g.addColorStop(1, "rgba(255,210,120,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(cx, by + h * 0.18, ts * 0.18, 0, Math.PI * 2);
+      ctx.fill();
       ctx.fillStyle = "#f0c14a";
       ctx.beginPath();
-      ctx.arc(cx, by + h * 0.15, ts * 0.06, 0, Math.PI * 2);
+      ctx.arc(cx, by + h * 0.15, ts * 0.05, 0, Math.PI * 2);
       ctx.fill();
-      // outline
-      ctx.strokeStyle = OUTLINE;
-      ctx.lineWidth = Math.max(1, ts * 0.05);
+      stroke(1.4);
       ctx.strokeRect(bx, by + h * 0.25, w, h * 0.75);
       ctx.strokeRect(bx - 2, by, w + 4, h * 0.3);
       break;
     }
     case "table": {
-      // wooden round table top-down
       const r = ts * 0.32;
       ctx.fillStyle = "#7a4a23";
       ctx.beginPath();
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.fill();
-      // planks
       ctx.strokeStyle = "#4a2a10";
       ctx.lineWidth = 1;
       for (let i = -1; i <= 1; i++) {
@@ -726,13 +837,10 @@ function proceduralObject(
         ctx.lineTo(cx + off, cy + r * 0.9);
         ctx.stroke();
       }
-      // outline
-      ctx.strokeStyle = OUTLINE;
-      ctx.lineWidth = Math.max(1, ts * 0.05);
+      stroke(1.4);
       ctx.beginPath();
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.stroke();
-      // tiny food/cup
       ctx.fillStyle = "#d9b46a";
       ctx.beginPath();
       ctx.arc(cx - r * 0.3, cy - r * 0.1, ts * 0.05, 0, Math.PI * 2);
@@ -745,12 +853,10 @@ function proceduralObject(
     }
     case "barrel": {
       const r = ts * 0.26;
-      // body
       ctx.fillStyle = "#7a4a23";
       ctx.beginPath();
       ctx.ellipse(cx, cy, r, r * 1.05, 0, 0, Math.PI * 2);
       ctx.fill();
-      // iron bands
       ctx.strokeStyle = "#4a3a2a";
       ctx.lineWidth = Math.max(2, ts * 0.04);
       ctx.beginPath();
@@ -759,27 +865,19 @@ function proceduralObject(
       ctx.beginPath();
       ctx.ellipse(cx, cy + r * 0.4, r * 0.95, r * 0.18, 0, 0, Math.PI * 2);
       ctx.stroke();
-      // top lid
       ctx.fillStyle = "#9c5d2c";
       ctx.beginPath();
       ctx.ellipse(cx, cy - r * 0.65, r * 0.9, r * 0.3, 0, 0, Math.PI * 2);
       ctx.fill();
-      // outline
-      ctx.strokeStyle = OUTLINE;
-      ctx.lineWidth = Math.max(1, ts * 0.04);
+      stroke(1.2);
       ctx.beginPath();
       ctx.ellipse(cx, cy, r, r * 1.05, 0, 0, Math.PI * 2);
       ctx.stroke();
       break;
     }
     case "tree": {
-      // trunk
       ctx.fillStyle = "#5a3814";
       ctx.fillRect(cx - ts * 0.06, cy + ts * 0.05, ts * 0.12, ts * 0.28);
-      ctx.strokeStyle = OUTLINE;
-      ctx.lineWidth = 1;
-      ctx.strokeRect(cx - ts * 0.06, cy + ts * 0.05, ts * 0.12, ts * 0.28);
-      // canopy: 3 stacked circles
       ctx.fillStyle = "#2d5a27";
       ctx.beginPath();
       ctx.arc(cx, cy - ts * 0.05, ts * 0.32, 0, Math.PI * 2);
@@ -792,9 +890,7 @@ function proceduralObject(
       ctx.beginPath();
       ctx.arc(cx + ts * 0.08, cy - ts * 0.18, ts * 0.18, 0, Math.PI * 2);
       ctx.fill();
-      // outline
-      ctx.strokeStyle = OUTLINE;
-      ctx.lineWidth = Math.max(1, ts * 0.04);
+      stroke(1.2);
       ctx.beginPath();
       ctx.arc(cx, cy - ts * 0.05, ts * 0.32, 0, Math.PI * 2);
       ctx.stroke();
@@ -803,10 +899,8 @@ function proceduralObject(
     case "house": {
       const w = ts * 0.75, h = ts * 0.42;
       const bx = cx - w / 2, by = cy - h / 2 + ts * 0.08;
-      // body
       ctx.fillStyle = "#a37547";
       ctx.fillRect(bx, by, w, h);
-      // roof
       ctx.fillStyle = "#7c3a1e";
       ctx.beginPath();
       ctx.moveTo(bx - 4, by);
@@ -814,15 +908,11 @@ function proceduralObject(
       ctx.lineTo(bx + w + 4, by);
       ctx.closePath();
       ctx.fill();
-      // door
       ctx.fillStyle = "#3f240e";
       ctx.fillRect(cx - ts * 0.08, by + h * 0.4, ts * 0.16, h * 0.6);
-      // window
       ctx.fillStyle = "#f0c14a";
       ctx.fillRect(bx + w * 0.18, by + h * 0.25, ts * 0.1, ts * 0.1);
-      // outline
-      ctx.strokeStyle = OUTLINE;
-      ctx.lineWidth = Math.max(1, ts * 0.05);
+      stroke(1.6);
       ctx.strokeRect(bx, by, w, h);
       ctx.beginPath();
       ctx.moveTo(bx - 4, by);
@@ -832,29 +922,23 @@ function proceduralObject(
       break;
     }
     case "well": {
-      // outer stone ring
       ctx.fillStyle = "#7a7588";
       ctx.beginPath();
       ctx.arc(cx, cy, ts * 0.32, 0, Math.PI * 2);
       ctx.fill();
-      // inner water
       ctx.fillStyle = "#1f4a7a";
       ctx.beginPath();
       ctx.arc(cx, cy, ts * 0.22, 0, Math.PI * 2);
       ctx.fill();
-      // water shimmer
       ctx.strokeStyle = "rgba(255,255,255,0.45)";
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.arc(cx, cy + ts * 0.04, ts * 0.14, 0.2, Math.PI - 0.2);
       ctx.stroke();
-      // outline
-      ctx.strokeStyle = OUTLINE;
-      ctx.lineWidth = Math.max(1, ts * 0.04);
+      stroke(1.2);
       ctx.beginPath();
       ctx.arc(cx, cy, ts * 0.32, 0, Math.PI * 2);
       ctx.stroke();
-      // stone segments
       ctx.beginPath();
       for (let a = 0; a < Math.PI * 2; a += Math.PI / 4) {
         ctx.moveTo(cx + Math.cos(a) * ts * 0.22, cy + Math.sin(a) * ts * 0.22);
@@ -863,11 +947,370 @@ function proceduralObject(
       ctx.stroke();
       break;
     }
-    default: {
-      ctx.fillStyle = "#aaaaaa";
+    case "skull": {
+      ctx.fillStyle = "#e8dec8";
       ctx.beginPath();
-      ctx.arc(cx, cy, ts * 0.2, 0, Math.PI * 2);
+      ctx.arc(cx, cy - ts * 0.04, ts * 0.18, 0, Math.PI * 2);
       ctx.fill();
+      ctx.fillStyle = "#d4c8a8";
+      ctx.fillRect(cx - ts * 0.10, cy + ts * 0.08, ts * 0.20, ts * 0.08);
+      // eyes + nose
+      ctx.fillStyle = "#0a0606";
+      ctx.beginPath();
+      ctx.arc(cx - ts * 0.06, cy - ts * 0.05, ts * 0.03, 0, Math.PI * 2);
+      ctx.arc(cx + ts * 0.06, cy - ts * 0.05, ts * 0.03, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(cx, cy + ts * 0.02);
+      ctx.lineTo(cx - ts * 0.02, cy + ts * 0.06);
+      ctx.lineTo(cx + ts * 0.02, cy + ts * 0.06);
+      ctx.closePath();
+      ctx.fill();
+      // teeth lines
+      ctx.strokeStyle = "#3a2a1a";
+      ctx.lineWidth = 1;
+      for (let i = -2; i <= 2; i++) {
+        ctx.beginPath();
+        ctx.moveTo(cx + i * ts * 0.035, cy + ts * 0.08);
+        ctx.lineTo(cx + i * ts * 0.035, cy + ts * 0.16);
+        ctx.stroke();
+      }
+      stroke(1.0);
+      ctx.beginPath();
+      ctx.arc(cx, cy - ts * 0.04, ts * 0.18, 0, Math.PI * 2);
+      ctx.stroke();
+      break;
+    }
+    case "bones": {
+      ctx.strokeStyle = "#e8dec8";
+      ctx.lineWidth = Math.max(2, ts * 0.06);
+      ctx.lineCap = "round";
+      // crossed bones
+      ctx.beginPath();
+      ctx.moveTo(cx - ts * 0.20, cy - ts * 0.16);
+      ctx.lineTo(cx + ts * 0.20, cy + ts * 0.16);
+      ctx.moveTo(cx + ts * 0.20, cy - ts * 0.16);
+      ctx.lineTo(cx - ts * 0.20, cy + ts * 0.16);
+      ctx.stroke();
+      // bone knobs
+      ctx.fillStyle = "#e8dec8";
+      const pts = [
+        [-0.20, -0.16],[0.20, 0.16],[0.20, -0.16],[-0.20, 0.16]
+      ] as const;
+      for (const [dx, dy] of pts) {
+        ctx.beginPath();
+        ctx.arc(cx + dx * ts, cy + dy * ts, ts * 0.05, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    }
+    case "candle": {
+      // base
+      ctx.fillStyle = "#d8c590";
+      ctx.fillRect(cx - ts * 0.05, cy - ts * 0.02, ts * 0.10, ts * 0.18);
+      stroke(1.0);
+      ctx.strokeRect(cx - ts * 0.05, cy - ts * 0.02, ts * 0.10, ts * 0.18);
+      // wick
+      ctx.strokeStyle = "#1a1208";
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - ts * 0.02);
+      ctx.lineTo(cx, cy - ts * 0.08);
+      ctx.stroke();
+      // flame
+      ctx.fillStyle = "#ffe066";
+      ctx.beginPath();
+      ctx.ellipse(cx, cy - ts * 0.12, ts * 0.04, ts * 0.08, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#f06820";
+      ctx.beginPath();
+      ctx.ellipse(cx, cy - ts * 0.10, ts * 0.025, ts * 0.05, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // glow
+      const g = ctx.createRadialGradient(cx, cy - ts * 0.12, 0, cx, cy - ts * 0.12, ts * 0.45);
+      g.addColorStop(0, "rgba(255,220,120,0.45)");
+      g.addColorStop(1, "rgba(255,220,120,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(cx, cy - ts * 0.12, ts * 0.45, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    }
+    case "statue": {
+      // base
+      ctx.fillStyle = "#7a7588";
+      ctx.fillRect(cx - ts * 0.18, cy + ts * 0.12, ts * 0.36, ts * 0.10);
+      // figure
+      ctx.fillStyle = "#a8a3bd";
+      ctx.beginPath();
+      ctx.arc(cx, cy - ts * 0.10, ts * 0.10, 0, Math.PI * 2);  // head
+      ctx.fill();
+      ctx.fillRect(cx - ts * 0.10, cy - ts * 0.02, ts * 0.20, ts * 0.16);  // body
+      ctx.beginPath();
+      ctx.moveTo(cx - ts * 0.10, cy + ts * 0.12);
+      ctx.lineTo(cx - ts * 0.18, cy + ts * 0.14);
+      ctx.lineTo(cx + ts * 0.18, cy + ts * 0.14);
+      ctx.lineTo(cx + ts * 0.10, cy + ts * 0.12);
+      ctx.fill();
+      stroke(1.2);
+      ctx.beginPath();
+      ctx.arc(cx, cy - ts * 0.10, ts * 0.10, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeRect(cx - ts * 0.18, cy + ts * 0.12, ts * 0.36, ts * 0.10);
+      break;
+    }
+    case "bookshelf": {
+      const w = ts * 0.70, h = ts * 0.50;
+      const bx = cx - w / 2, by = cy - h / 2;
+      ctx.fillStyle = "#5a3a1a";
+      ctx.fillRect(bx, by, w, h);
+      // books in 3 rows
+      const colors = ["#7a3030", "#3a5a7a", "#7a6030", "#3a7a4a", "#5a3a7a"];
+      for (let row = 0; row < 3; row++) {
+        for (let c = 0; c < 6; c++) {
+          ctx.fillStyle = colors[(row * 13 + c * 7) % colors.length];
+          ctx.fillRect(bx + 3 + c * (w / 6.5), by + 3 + row * (h / 3.2), w / 7, h / 3.6);
+        }
+      }
+      stroke(1.4);
+      ctx.strokeRect(bx, by, w, h);
+      break;
+    }
+    case "bed": {
+      const w = ts * 0.74, h = ts * 0.52;
+      const bx = cx - w / 2, by = cy - h / 2;
+      // frame
+      ctx.fillStyle = "#5a3a1a";
+      ctx.fillRect(bx, by, w, h);
+      // mattress
+      ctx.fillStyle = "#d8d8e8";
+      ctx.fillRect(bx + 3, by + h * 0.25, w - 6, h * 0.7);
+      // pillow
+      ctx.fillStyle = "#f5f0e8";
+      ctx.fillRect(bx + 6, by + h * 0.10, w * 0.30, h * 0.22);
+      // blanket
+      ctx.fillStyle = "#a04030";
+      ctx.fillRect(bx + 3, by + h * 0.55, w - 6, h * 0.4);
+      stroke(1.4);
+      ctx.strokeRect(bx, by, w, h);
+      break;
+    }
+    case "weapon_rack": {
+      const w = ts * 0.70, h = ts * 0.50;
+      const bx = cx - w / 2, by = cy - h / 2;
+      // back board
+      ctx.fillStyle = "#5a3a1a";
+      ctx.fillRect(bx, by + h * 0.7, w, h * 0.3);
+      // 3 weapons
+      ctx.strokeStyle = "#909098";
+      ctx.lineWidth = 2;
+      // sword
+      ctx.beginPath();
+      ctx.moveTo(bx + w * 0.20, by);
+      ctx.lineTo(bx + w * 0.20, by + h * 0.7);
+      ctx.stroke();
+      ctx.fillStyle = "#909098";
+      ctx.beginPath();
+      ctx.moveTo(bx + w * 0.16, by);
+      ctx.lineTo(bx + w * 0.24, by);
+      ctx.lineTo(bx + w * 0.20, by - 2);
+      ctx.closePath();
+      ctx.fill();
+      // axe
+      ctx.beginPath();
+      ctx.moveTo(bx + w * 0.50, by + 2);
+      ctx.lineTo(bx + w * 0.50, by + h * 0.7);
+      ctx.stroke();
+      ctx.fillStyle = "#a0a0a8";
+      ctx.beginPath();
+      ctx.moveTo(bx + w * 0.50, by + h * 0.15);
+      ctx.lineTo(bx + w * 0.66, by + h * 0.10);
+      ctx.lineTo(bx + w * 0.66, by + h * 0.30);
+      ctx.lineTo(bx + w * 0.50, by + h * 0.35);
+      ctx.closePath();
+      ctx.fill();
+      // spear
+      ctx.beginPath();
+      ctx.moveTo(bx + w * 0.80, by);
+      ctx.lineTo(bx + w * 0.80, by + h * 0.7);
+      ctx.stroke();
+      ctx.fillStyle = "#a0a0a8";
+      ctx.beginPath();
+      ctx.moveTo(bx + w * 0.76, by + 4);
+      ctx.lineTo(bx + w * 0.80, by - 4);
+      ctx.lineTo(bx + w * 0.84, by + 4);
+      ctx.closePath();
+      ctx.fill();
+      stroke(1.2);
+      ctx.strokeRect(bx, by + h * 0.7, w, h * 0.3);
+      break;
+    }
+    case "web": {
+      // spider web in the corner
+      ctx.strokeStyle = "rgba(220,220,235,0.7)";
+      ctx.lineWidth = 1;
+      const radii = [ts * 0.12, ts * 0.22, ts * 0.32];
+      for (const r of radii) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, Math.PI * 1.1, Math.PI * 1.9);
+        ctx.stroke();
+      }
+      for (let i = 0; i < 6; i++) {
+        const a = Math.PI * 1.1 + (Math.PI * 0.8 / 5) * i;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + Math.cos(a) * ts * 0.35, cy + Math.sin(a) * ts * 0.35);
+        ctx.stroke();
+      }
+      break;
+    }
+    case "crate": {
+      const s = ts * 0.50;
+      const bx = cx - s / 2, by = cy - s / 2;
+      ctx.fillStyle = "#7a4a23";
+      ctx.fillRect(bx, by, s, s);
+      ctx.strokeStyle = "#3f2812";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(bx + s * 0.1, by + s * 0.1, s * 0.8, s * 0.8);
+      ctx.beginPath();
+      ctx.moveTo(bx + s * 0.1, by + s * 0.1);
+      ctx.lineTo(bx + s * 0.9, by + s * 0.9);
+      ctx.moveTo(bx + s * 0.9, by + s * 0.1);
+      ctx.lineTo(bx + s * 0.1, by + s * 0.9);
+      ctx.stroke();
+      stroke(1.4);
+      ctx.strokeRect(bx, by, s, s);
+      break;
+    }
+    case "debris": {
+      // scattered rocks
+      const seed = ((o.x * 911) ^ (o.y * 277)) >>> 0;
+      for (let i = 0; i < 5; i++) {
+        const dx = ((seed >> (i * 3)) & 15) / 15 - 0.5;
+        const dy = ((seed >> (i * 3 + 4)) & 15) / 15 - 0.5;
+        const r = ts * (0.05 + ((seed >> (i + 7)) & 3) * 0.02);
+        ctx.fillStyle = i % 2 === 0 ? "#6a6072" : "#85788c";
+        ctx.beginPath();
+        ctx.arc(cx + dx * ts * 0.4, cy + dy * ts * 0.4, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = OUTLINE;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+      break;
+    }
+    case "campfire": {
+      // fire pit ring
+      ctx.fillStyle = "#3a2a1a";
+      ctx.beginPath();
+      ctx.arc(cx, cy, ts * 0.30, 0, Math.PI * 2);
+      ctx.fill();
+      // stones
+      ctx.fillStyle = "#7a7588";
+      for (let i = 0; i < 6; i++) {
+        const a = (Math.PI * 2 / 6) * i;
+        ctx.beginPath();
+        ctx.arc(cx + Math.cos(a) * ts * 0.28, cy + Math.sin(a) * ts * 0.28, ts * 0.06, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = OUTLINE;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+      // logs
+      ctx.fillStyle = "#5a3814";
+      ctx.fillRect(cx - ts * 0.18, cy - ts * 0.03, ts * 0.36, ts * 0.06);
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(Math.PI / 3);
+      ctx.fillRect(-ts * 0.18, -ts * 0.03, ts * 0.36, ts * 0.06);
+      ctx.restore();
+      // fire
+      const g = ctx.createRadialGradient(cx, cy - ts * 0.05, 0, cx, cy - ts * 0.05, ts * 0.40);
+      g.addColorStop(0, "rgba(255,230,120,1)");
+      g.addColorStop(0.5, "rgba(240,104,32,0.8)");
+      g.addColorStop(1, "rgba(240,104,32,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(cx, cy - ts * 0.05, ts * 0.40, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#ffe066";
+      ctx.beginPath();
+      ctx.ellipse(cx, cy - ts * 0.10, ts * 0.08, ts * 0.14, 0, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    }
+    case "rug": {
+      const w = ts * 0.82, h = ts * 0.62;
+      const bx = cx - w / 2, by = cy - h / 2;
+      // base
+      ctx.fillStyle = "#a04030";
+      ctx.fillRect(bx, by, w, h);
+      // pattern
+      ctx.fillStyle = "#e0b04a";
+      ctx.fillRect(bx + 4, by + 4, w - 8, h - 8);
+      ctx.fillStyle = "#a04030";
+      ctx.fillRect(bx + 10, by + 10, w - 20, h - 20);
+      // center diamond
+      ctx.fillStyle = "#e0b04a";
+      ctx.beginPath();
+      ctx.moveTo(cx, by + h * 0.25);
+      ctx.lineTo(bx + w * 0.75, cy);
+      ctx.lineTo(cx, by + h * 0.75);
+      ctx.lineTo(bx + w * 0.25, cy);
+      ctx.closePath();
+      ctx.fill();
+      // fringe
+      ctx.strokeStyle = "#f0d090";
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 12; i++) {
+        const fx = bx + (w / 12) * i + 2;
+        ctx.beginPath();
+        ctx.moveTo(fx, by);
+        ctx.lineTo(fx, by - 4);
+        ctx.moveTo(fx, by + h);
+        ctx.lineTo(fx, by + h + 4);
+        ctx.stroke();
+      }
+      stroke(0.8);
+      ctx.strokeRect(bx, by, w, h);
+      break;
+    }
+    case "fountain": {
+      ctx.fillStyle = "#7a7588";
+      ctx.beginPath();
+      ctx.arc(cx, cy, ts * 0.34, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#1f6aa0";
+      ctx.beginPath();
+      ctx.arc(cx, cy, ts * 0.26, 0, Math.PI * 2);
+      ctx.fill();
+      // center column
+      ctx.fillStyle = "#a8a3bd";
+      ctx.beginPath();
+      ctx.arc(cx, cy, ts * 0.08, 0, Math.PI * 2);
+      ctx.fill();
+      // water spray
+      ctx.strokeStyle = "rgba(180,210,240,0.8)";
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 8; i++) {
+        const a = (Math.PI * 2 / 8) * i;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + Math.cos(a) * ts * 0.18, cy + Math.sin(a) * ts * 0.18);
+        ctx.stroke();
+      }
+      stroke(1.2);
+      ctx.beginPath();
+      ctx.arc(cx, cy, ts * 0.34, 0, Math.PI * 2);
+      ctx.stroke();
+      break;
+    }
+    default: {
+      ctx.fillStyle = "#aaa";
+      ctx.beginPath();
+      ctx.arc(cx, cy, ts * 0.18, 0, Math.PI * 2);
+      ctx.fill();
+      stroke(1);
+      ctx.stroke();
     }
   }
   ctx.restore();
@@ -878,7 +1321,6 @@ function proceduralObject(
 // ============================================================
 
 function getCachedSprite(url: string): HTMLImageElement | null {
-  // Touch loader so caching has started even if this is the first time we see the url.
   loadSprite(url);
   return getSpriteSync(url);
 }

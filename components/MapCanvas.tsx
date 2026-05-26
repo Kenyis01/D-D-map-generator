@@ -14,14 +14,14 @@ export interface MapCanvasHandle {
 interface Props {
   map: MapData;
   showGrid?: boolean;
-  showLabels?: boolean;
+  showBadges?: boolean;
   className?: string;
   /** Optional fixed tile size in CSS pixels (otherwise fits container). */
   tileSize?: number;
 }
 
 const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
-  { map, showGrid = true, showLabels = true, className, tileSize },
+  { map, showGrid = true, showBadges = true, className, tileSize },
   ref
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -40,14 +40,14 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
         tileSize ?? Math.floor(Math.min(w / map.width, h / map.height));
       canvas.style.width = `${ts * map.width}px`;
       canvas.style.height = `${ts * map.height}px`;
-      renderMap(canvas, map, { tileSize: ts, showGrid, showLabels });
+      renderMap(canvas, map, { tileSize: ts, showGrid, showBadges });
     }
 
     draw();
     const ro = new ResizeObserver(() => draw());
     ro.observe(wrap);
     return () => ro.disconnect();
-  }, [map, showGrid, showLabels, tileSize]);
+  }, [map, showGrid, showBadges, tileSize]);
 
   useImperativeHandle(
     ref,

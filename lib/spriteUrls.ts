@@ -38,7 +38,20 @@ export const SPRITE_URLS: SpriteLibrary = {
     barrel: [t(183), t(193)],
     tree: [t(200), t(205), t(225), t(197)],
     house: [], // procedural
-    well: [] // procedural
+    well: [], // procedural
+    skull: [],
+    bones: [],
+    candle: [],
+    statue: [],
+    bookshelf: [],
+    bed: [],
+    weapon_rack: [],
+    web: [],
+    crate: [],
+    debris: [],
+    campfire: [],
+    rug: [],
+    fountain: []
   },
   roomFloor: {}
 };

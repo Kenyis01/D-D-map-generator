@@ -24,7 +24,20 @@ export type ObjectType =
   | "barrel"
   | "tree"
   | "house"
-  | "well";
+  | "well"
+  | "skull"
+  | "bones"
+  | "candle"
+  | "statue"
+  | "bookshelf"
+  | "bed"
+  | "weapon_rack"
+  | "web"
+  | "crate"
+  | "debris"
+  | "campfire"
+  | "rug"
+  | "fountain";
 
 export type SpecialTileType =
   | "wall"
