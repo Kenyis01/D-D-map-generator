@@ -102,7 +102,8 @@ export function renderMap(
   const computed = computeLayers(map);
   paint(ctx, map, tileSize, computed, opts.showGrid ?? true, opts.showBadges ?? true);
 
-  Promise.all(allSpriteUrls().map(loadSprite)).then(() => {
+  // Only load the sprites this specific map needs (not the whole library)
+  Promise.all(spritesUsedByMap(map, computed).map(loadSprite)).then(() => {
     const ctx2 = canvas.getContext("2d");
     if (!ctx2) return;
     ctx2.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -122,10 +123,62 @@ export async function renderToExportCanvas(
   if (!ctx) return canvas;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.imageSmoothingEnabled = false;
-  await Promise.all(allSpriteUrls().map(loadSprite));
   const computed = computeLayers(map);
+  await Promise.all(spritesUsedByMap(map, computed).map(loadSprite));
   paint(ctx, map, tileSize, computed, true, false);
   return canvas;
+}
+
+/** Walks the map and returns the unique set of sprite URLs that will be drawn. */
+function spritesUsedByMap(map: MapData, layers: ComputedLayers): string[] {
+  const urls = new Set<string>();
+
+  // Background (only for outdoor maps; dungeons use solid dark)
+  const isDungeon = map.map_type === "dungeon";
+  if (!isDungeon) {
+    const variants = SPRITES.terrain[map.background_tile];
+    if (variants && variants.length) {
+      for (let y = 0; y < map.height; y++) {
+        for (let x = 0; x < map.width; x++) {
+          const u = pickVariant(variants, x, y);
+          if (u) urls.add(u);
+        }
+      }
+    }
+  }
+
+  // Interior floors
+  const floorVariants = SPRITES.terrain[map.background_tile];
+  if (floorVariants && floorVariants.length) {
+    for (let y = 0; y < map.height; y++) {
+      for (let x = 0; x < map.width; x++) {
+        if (!layers.interior[y * map.width + x]) continue;
+        const u = pickVariant(floorVariants, x, y);
+        if (u) urls.add(u);
+      }
+    }
+  }
+
+  // Special tiles
+  for (const s of map.special_tiles) {
+    if (s.type === "wall") continue;
+    const variants = SPRITES.special[s.type];
+    if (variants && variants.length) {
+      const u = pickVariant(variants, s.x, s.y);
+      if (u) urls.add(u);
+    }
+  }
+
+  // Objects
+  for (const o of map.objects) {
+    const variants = SPRITES.objects[o.type as ObjectType];
+    if (variants && variants.length) {
+      const u = pickVariant(variants, o.x, o.y);
+      if (u) urls.add(u);
+    }
+  }
+
+  return Array.from(urls);
 }
 
 // ============================================================

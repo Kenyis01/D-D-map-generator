@@ -37,7 +37,26 @@ export type ObjectType =
   | "debris"
   | "campfire"
   | "rug"
-  | "fountain";
+  | "fountain"
+  // Extra types backed by FA sprites:
+  | "torch"
+  | "brazier"
+  | "lantern"
+  | "fireplace"
+  | "treasure"
+  | "tombstone"
+  | "coffin"
+  | "seating"
+  | "rock"
+  | "bush"
+  | "flower"
+  | "mushroom"
+  | "stairs"
+  | "cobweb"
+  | "weapon_sword"
+  | "weapon_axe"
+  | "armor_stand"
+  | "beast_bones";
 
 export type SpecialTileType =
   | "wall"

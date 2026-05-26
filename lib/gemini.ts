@@ -20,7 +20,7 @@ const SCHEMA_DESCRIPTION = `Return ONLY a single valid JSON object (no markdown,
   ],
   "objects": [
     { "x": int, "y": int,
-      "type": "chest"|"door"|"pillar"|"trap"|"altar"|"table"|"barrel"|"tree"|"house"|"well"|"skull"|"bones"|"candle"|"statue"|"bookshelf"|"bed"|"weapon_rack"|"web"|"crate"|"debris"|"campfire"|"rug"|"fountain"
+      "type": "chest"|"door"|"pillar"|"trap"|"altar"|"table"|"barrel"|"tree"|"house"|"well"|"skull"|"bones"|"candle"|"statue"|"bookshelf"|"bed"|"weapon_rack"|"web"|"crate"|"debris"|"campfire"|"rug"|"fountain"|"torch"|"brazier"|"lantern"|"fireplace"|"treasure"|"tombstone"|"coffin"|"seating"|"rock"|"bush"|"flower"|"mushroom"|"stairs"|"cobweb"|"weapon_sword"|"weapon_axe"|"armor_stand"|"beast_bones"
     }
   ],
   "special_tiles": [
@@ -36,18 +36,19 @@ Rules:
 - Every connection references existing room ids.
 - 4 to 7 rooms total. Mix room sizes (some small chambers 3x3, one or two big halls 6x5).
 - ABSOLUTELY CRITICAL: Place AT LEAST 25 objects total, ideally 35-50. Empty rooms are a failure. Every room must contain 5-10 objects appropriate to its purpose. Scatter loose decorative objects (skulls, bones, debris, candles, webs) throughout corridors and room edges too.
-- Object placement by room type:
-  * entrance: bones, skull, debris, candle, web (looted-feel)
-  * chamber: pillar (4-6 placed symmetrically), candle, statue, bones, web, rug
-  * boss: altar, statue, pillar, weapon_rack, bones, skull, candle, campfire
-  * treasure: chest (3-5), candle, debris, web, bones, statue, weapon_rack
-  * corridor: web, debris, bones, candle, trap, skull
-  * shop/tavern: table, barrel, crate, bookshelf, candle, rug, chest
-  * open: campfire, barrel, crate, debris, bones, table
+- Object placement by room type — USE THE FULL VARIETY of object types, not just the basics:
+  * entrance: bones, skull, debris, candle, torch, web, cobweb, rock, tombstone
+  * chamber: pillar (4-6 symmetrical), candle, brazier, statue, bones, web, rug, fireplace, seating
+  * boss: altar, statue, pillar, weapon_rack, weapon_sword, weapon_axe, armor_stand, brazier, bones, skull, campfire, treasure
+  * treasure: chest (3-5), treasure, candle, brazier, web, statue, weapon_rack, coffin, rug
+  * corridor: web, cobweb, debris, bones, candle, torch, trap, skull, rock
+  * shop: table, barrel, crate, bookshelf, candle, lantern, rug, chest, seating, weapon_sword
+  * tavern: table, seating, barrel, crate, candle, lantern, rug, fireplace, bookshelf
+  * open: campfire, barrel, crate, debris, bones, table, rock, tree
 - For dungeon: stone_floor background. DON'T add wall special_tiles — the renderer draws walls around each room automatically. Focus on filling rooms with objects.
-- For overworld: grass background. Add forest clusters (special_tiles), road tiles connecting locations, a small water body. Place 8-15 trees, 3-5 houses, 1-2 wells, 4-6 debris/bones/campfires.
-- For town: dirt background. Add road tiles between buildings. Place 4-8 houses, 2-3 wells, 4-6 barrels, 2-3 tables, 3-5 crates, 1-2 fountains, plus candles/rugs near houses.
-- For interior: wood_floor background. Place 3-5 tables, 5-10 barrels, 4-6 chests, 2-4 pillars, 3-5 bookshelves, 2-3 beds, 4-8 candles, 2-3 rugs, 2-3 weapon_racks.
+- For overworld: grass background. Add forest clusters (special_tiles), road tiles connecting locations, a small water body. Place 8-15 trees, 4-8 bushes, 3-5 flowers, 2-4 mushrooms, 5-10 rocks, 3-5 houses, 1-2 wells, 2-3 campfires.
+- For town: dirt background. Add road tiles between buildings. Place 4-8 houses, 2-3 wells, 4-6 barrels, 3-5 crates, 2-3 tables outside, 1-2 fountains, 2-3 lanterns/torches, 2-3 carts/rugs.
+- For interior: wood_floor background. Place 3-5 tables, 5-10 barrels, 4-6 chests, 3-5 bookshelves, 2-3 beds, 4-8 candles, 2-3 lanterns, 1-2 fireplaces, 2-3 rugs, 2-3 weapon_racks, several seating.
 - "label" should be SHORT (2-3 words max, e.g. "Throne Room", "Treasury", "Crypt"). Long labels overflow the room.
 - Output ONLY the JSON object.`;
 
