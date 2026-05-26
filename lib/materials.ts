@@ -156,42 +156,24 @@ export function filterByChestContents(
 // Catalog exposed to LLM prompt (kept compact for context budget)
 // ============================================================
 export const MATERIAL_CATALOG_FOR_LLM = `
-FLOOR_MATERIALS by use case:
-  - "herringbone"        — polished diagonal stone pattern. Use for: noble halls, throne rooms, temples
-  - "rectangular_tiles"  — large cut stone slabs. Use for: castles, formal interiors, banks, government
-  - "flat_stones"        — irregular cobbled stone. Use for: crypts, generic dungeons, old corridors
-  - "marble"             — luxurious polished marble. Use for: palaces, treasuries, royal chambers
-  - "wood_aged"          — worn wooden planks with damage. Use for: old taverns, abandoned shacks
-  - "wood_scratched"     — scuffed wooden planks. Use for: working taverns, busy inns, ship interiors
-  - "wood_plain"         — clean wooden planks. Use for: bedrooms, parlors, libraries, studies
-  - "cracked_dirt"       — cracked dry earth. Use for: cellars, ruins, exposed cave passages
-  - "gravel"             — loose gravel/pebbles. Use for: mines, courtyards, ruins
-  - "rocky_dirt"         — rocky uneven terrain. Use for: mountain caves, rugged dungeons
-  - "cave_floor"         — natural cave floor. Use for: underground caverns, natural caves
-  - "plain_dirt"         — plain earth. Use for: stables, basements, dirt cellars
-  - "grassy_dirt"        — patchy grass on dirt. Use for: outdoor edges, garden paths
-  - "grass_long"         — tall grass. Use for: wilderness, fields
-  - "grass_medium"       — short grass. Use for: lawns, courtyards
+floor_material tokens (pick by room purpose):
+  herringbone, rectangular_tiles, marble  → noble halls, throne, treasury, temple
+  flat_stones                              → generic dungeon, crypt, corridor
+  wood_plain                               → bedroom, library, parlor, study
+  wood_scratched                           → busy tavern, inn, ship
+  wood_aged                                → old tavern, abandoned shack
+  cracked_dirt, plain_dirt                 → cellar, basement, dirt floor
+  gravel, rocky_dirt, cave_floor          → mine, cave, rugged dungeon
+  grass_long, grass_medium, grassy_dirt   → outdoor
 
-WOOD_PALETTES (apply per ROOM to chests/tables/beds/doors/bookshelves so they match):
-  - "ashen"   — charred dark gray wood. Use for: burned ruins, gothic crypts, sinister rooms
-  - "dark"    — deep walnut. Use for: noble libraries, scholarly studies, formal dining
-  - "light"   — pale oak/pine. Use for: bedrooms, kitchens, modest cottages
-  - "red"     — cherry / redwood. Use for: luxurious manors, royal chambers
-  - "walnut"  — medium brown. Use for: taverns, inns, general purpose (DEFAULT)
+wood_palette tokens (per ROOM, applies to chest/table/bed/door/bookshelf):
+  ashen → burned/gothic   dark → noble/scholarly   light → bedroom/cottage
+  red → luxurious/royal   walnut → tavern/general (default)
 
-STONE_PALETTES (apply per MAP for walls and pillars):
-  - "earthy"     — brown weathered stone. Use for: typical dungeons (DEFAULT)
-  - "redrock"    — red sandstone. Use for: desert temples, volcanic regions
-  - "sandstone"  — pale yellow stone. Use for: desert cities, ancient ruins
-  - "slate"      — dark gray. Use for: gothic strongholds, mountain fortresses
-  - "volcanic"   — black volcanic rock. Use for: demon lairs, fire temples
-  - "marble"     — white polished. Use for: palaces, divine temples
+wall_palette tokens (per MAP, applies to walls + pillars):
+  earthy (default dungeon), redrock (desert/volcanic), sandstone (desert ruin),
+  slate (gothic), volcanic (demon lair), marble (palace/temple)
 
-CHEST_CONTENTS (optional per chest):
-  - "empty"  — open empty chest. Use for: looted rooms, mimics
-  - "coins"  — full of gold coins. Use for: treasure rooms, vaults
-  - "silver" — silver coins. Use for: minor stashes
-  - "mixed"  — gems + coins. Use for: pirate hoards, dragon nests
-  - "rusty"  — old corroded chest. Use for: abandoned dungeons, sunken ships
+chest.contents tokens (optional):
+  empty, coins, silver, mixed, rusty
 `.trim();

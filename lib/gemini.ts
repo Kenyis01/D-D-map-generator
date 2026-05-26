@@ -38,55 +38,32 @@ Return ONLY a single valid JSON object (no markdown, no backticks, no commentary
   ]
 }
 
-== MATERIAL CATALOG (pick semantically per room/map) ==
+== MATERIAL CATALOG ==
 ${MATERIAL_CATALOG_FOR_LLM}
 
-== STRUCTURAL RULES ==
-1. INFER map_type from the prompt — if the user describes a tavern, use "interior". A forest, "overworld". A castle dungeon, "dungeon". Don't ask the user.
-2. Coords are 0-indexed, must fit inside the grid with a 2-tile margin from the edges (corridors need room).
-3. Rooms must NOT overlap. Sizes: small rooms 3×3 to 4×4, medium 5×5 to 6×5, big halls 7×6 to 8×7. Mix sizes.
-4. 4 to 7 rooms total.
-5. Every connection.from and .to must reference an existing room id. Aim for one connection per pair of adjacent rooms; no isolated rooms.
+== RULES ==
+- INFER map_type from the prompt (tavern→interior, forest→overworld, castle→dungeon).
+- background_tile: dungeon=stone_floor, overworld=grass, town=dirt, interior=wood_floor.
+- 4-7 rooms, sizes 3×3 to 8×7, no overlap, 2-tile margin from edges. Mix sizes.
+- Every connection's from/to must reference an existing room id. Avoid isolated rooms.
+- Each room: ONE floor_material + ONE wood_palette by purpose. NEVER mix wood colors within a room.
+- Rooms of same function share materials; CHANGE material when function changes (throne marble+red → corridor flat_stones+walnut → cells cracked_dirt+ashen).
+- wall_palette set ONCE per map (earthy default, marble for palaces, slate for gothic, etc.).
+- Objects: 25-40 total. Against walls (within 1 tile of edge). Center mostly open except for single features (rug/altar/fountain/fire).
+- Density caps: 3×3→max 4, 4×4→6, 5×5/6×5→6-9, big halls→8-14.
+- NEVER emit "wall" in special_tiles.
 
-== MATERIAL & THEMATIC COHESION (CRITICAL — the main visual quality lever) ==
-6. Each room gets ONE floor_material AND ONE wood_palette appropriate to its purpose. NEVER mix wood colors within a room.
-7. Spaces of the SAME purpose in the same map should share materials. E.g., two bedrooms in an inn → both wood_plain floor + light wood. A noble's chambers + study → both marble + dark wood. A basement + cellar → both cracked_dirt + ashen wood.
-8. CONTRAST rooms by changing material when the function changes. Throne room (marble + red wood) → corridor (flat_stones + walnut) → dungeon cells (cracked_dirt + ashen).
-9. wall_palette is set ONCE for the whole map. Match it to the building/theme:
-   - Dungeon/crypt: earthy or slate
-   - Desert temple: sandstone or redrock
-   - Volcanic lair: volcanic
-   - Palace/cathedral: marble
-   - Default: earthy
+== ROOM PROFILES ==
+entrance: flat_stones / cracked_dirt; rocks debris bones skull candle web torch brazier.
+chamber: flat_stones / rectangular_tiles; pillar(4-6 perimeter) candle statue brazier bones rug.
+corridor: flat_stones; sparse: web cobweb debris bones candle torch trap skull. Keep the actual path open.
+boss: marble / herringbone; altar(center) statue pillar weapon_rack brazier bones treasure. Wood: red or ashen.
+treasure: marble / herringbone; chest(contents:coins|mixed, 3-5 along walls) candle brazier weapon_rack coffin. Wood: dark or red.
+shop: wood_plain / wood_scratched; table barrel crate bookshelf candle lantern rug chest seating. Wood: walnut.
+tavern: wood_aged / wood_scratched; tables+seating arrangements, barrels along walls, crates, candles, lanterns, rugs, fireplace, bookshelf. Wood: walnut.
+open: cracked_dirt / grassy_dirt; campfire(center) barrel crate debris bones table seating rock tree. Wood: ashen.
 
-== OBJECT PLACEMENT — DENSITY + GEOMETRY ==
-10. Place 25-45 objects total. Empty rooms are unacceptable.
-11. Objects should be PLACED AGAINST WALLS (within 1 tile of room edge), with the room center mostly open for movement. Exceptions: rugs and altars sit center; campfires/fireplaces against a wall; round tables central with chairs around.
-12. Density by room size:
-    - 3×3 room: max 4 objects
-    - 4×4 / 4×5: max 6 objects
-    - 5×5 / 6×5: 6-9 objects
-    - Big halls (7×6+): 8-14 objects
-13. Don't put objects on the exact center of small rooms unless it's a single feature object (altar, fountain, fire pit).
-
-== ROOM-TYPE PROFILES (use these to drive material + furnishings) ==
-- entrance: flat_stones / cracked_dirt floor. Objects: rocks, debris, bones, skull, candle, web, cobweb, torch, brazier. Mood: looted, abandoned.
-- chamber: flat_stones / rectangular_tiles. Objects: pillar (4-6 around perimeter), candle, statue, brazier, bones, web, rug.
-- corridor: flat_stones. Objects (sparse, only along edges): web, cobweb, debris, bones, candle, torch, trap, skull, rock. DO NOT put corridor objects in the actual corridor PATH between rooms.
-- boss: marble / herringbone / rectangular_tiles. Objects: altar (center), statue (corners), pillar, weapon_rack, weapon_sword, weapon_axe, armor_stand, brazier, bones, treasure. Wood: red or ashen.
-- treasure: marble / herringbone. Objects: chest with contents:"coins" or "mixed" (3-5 along walls), treasure piles, candle, brazier, weapon_rack, coffin. Wood: dark or red.
-- shop: wood_plain or wood_scratched floor. Objects: table (centerwall), barrel, crate, bookshelf, candle, lantern, rug, chest:empty, seating. Wood: walnut.
-- tavern: wood_aged or wood_scratched. Objects: table+seating arrangements, barrel along walls, crate, candle, lantern, rug, fireplace, bookshelf, bed (if upstairs). Wood: walnut.
-- open: cracked_dirt / grassy_dirt / gravel. Objects: campfire (center), barrel, crate, debris, bones, table+seating, rock, tree (rare). Wood: ashen.
-
-== MAP_TYPE FLOOR DEFAULTS (when no per-room floor_material is needed) ==
-- dungeon: background_tile=stone_floor. wall_palette default earthy.
-- overworld: background_tile=grass. wall_palette unused.
-- town: background_tile=dirt. wall_palette default sandstone.
-- interior: background_tile=wood_floor. wall_palette default earthy.
-
-== FINAL OUTPUT ==
-Output ONLY the JSON object. No prose, no markdown.`;
+Output ONLY the JSON object.`;
 
 const apiKey = process.env.GEMINI_API_KEY;
 
@@ -152,7 +129,10 @@ async function callGroq(apiKey: string, system: string, user: string): Promise<s
     },
     body: JSON.stringify({
       model,
-      temperature: 1.0,
+      temperature: 0.9,
+      // Big maps with rich per-room material + 30-50 objects can produce
+      // 3-5K tokens of JSON. Default Groq cap truncates them mid-output.
+      max_tokens: 8192,
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: system },
