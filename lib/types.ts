@@ -74,6 +74,10 @@ export interface MapRoom {
   h: number;
   type: RoomType;
   label?: string;
+  /** Floor material token from materials.ts FloorMaterial — overrides background_tile. */
+  floor_material?: string;
+  /** Wood palette for furniture in this room (ashen / dark / light / red / walnut). */
+  wood_palette?: string;
 }
 
 export interface MapConnection {
@@ -86,6 +90,8 @@ export interface MapObject {
   x: number;
   y: number;
   type: ObjectType;
+  /** Optional override: chest contents (empty/coins/silver/mixed/rusty). */
+  contents?: string;
 }
 
 export interface MapSpecialTile {
@@ -101,6 +107,8 @@ export interface MapData {
   height: number;
   theme: string;
   background_tile: BackgroundTile;
+  /** Stone palette token from materials.ts — applies to walls and stone pillars. */
+  wall_palette?: string;
   rooms: MapRoom[];
   connections: MapConnection[];
   objects: MapObject[];

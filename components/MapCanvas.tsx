@@ -8,7 +8,10 @@ export interface MapCanvasHandle {
   toBlob: (type?: string, quality?: number) => Promise<Blob | null>;
   toDataURL: (type?: string) => string | null;
   /** Build a fresh high-resolution canvas suitable for PNG export. */
-  exportHiRes: (tileSize?: number) => Promise<HTMLCanvasElement | null>;
+  exportHiRes: (
+    tileSize?: number,
+    opts?: { showGrid?: boolean }
+  ) => Promise<HTMLCanvasElement | null>;
 }
 
 interface Props {
@@ -62,8 +65,8 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
       toDataURL(type = "image/png") {
         return canvasRef.current?.toDataURL(type) ?? null;
       },
-      async exportHiRes(ts = 64) {
-        return renderToExportCanvas(map, ts);
+      async exportHiRes(ts = 64, opts) {
+        return renderToExportCanvas(map, ts, { showGrid: opts?.showGrid ?? true });
       }
     }),
     [map]

@@ -7,7 +7,7 @@
  * To regenerate after adding files: `npm run build:manifest`
  */
 import manifest from "./sprite-manifest.json";
-import type { SpriteLibrary } from "./sprites";
+import type { Sprite, SpriteLibrary } from "./sprites";
 import type {
   BackgroundTile,
   ObjectType,
@@ -15,8 +15,8 @@ import type {
 } from "./types";
 
 type ManifestShape = {
-  terrain: Record<string, string[]>;
-  objects: Record<string, string[]>;
+  terrain: Record<string, Sprite[]>;
+  objects: Record<string, Sprite[]>;
 };
 
 const M = manifest as unknown as ManifestShape;
@@ -31,39 +31,50 @@ const OBJECT_ALIASES: Partial<Record<ObjectType, ObjectType[]>> = {
 const SPECIAL_FROM_TERRAIN: Partial<Record<SpecialTileType, string>> = {
   water: "water",
   lava: "lava",
-  forest: "forest" // optional terrain/forest; otherwise we use tree sprites below
+  forest: "forest"
 };
 
-function objectSprites(type: ObjectType): string[] {
-  const direct = M.objects[type] ?? [];
-  const aliasUrls: string[] = [];
+function get(category: Record<string, Sprite[]>, key: string): Sprite[] {
+  return category[key] ?? [];
+}
+
+function objectSprites(type: ObjectType): Sprite[] {
+  const direct = get(M.objects, type);
+  const aliasSprites: Sprite[] = [];
   for (const alias of OBJECT_ALIASES[type] ?? []) {
-    for (const u of M.objects[alias] ?? []) aliasUrls.push(u);
+    for (const s of get(M.objects, alias)) aliasSprites.push(s);
   }
-  return [...direct, ...aliasUrls];
+  return [...direct, ...aliasSprites];
 }
 
-function terrainSprites(name: BackgroundTile | string): string[] {
-  return M.terrain[name] ?? [];
+function terrainSprites(name: BackgroundTile | string): Sprite[] {
+  return get(M.terrain, name);
 }
 
-function specialSprites(type: SpecialTileType): string[] {
-  // Prefer dedicated terrain entry if present
+function specialSprites(type: SpecialTileType): Sprite[] {
+  if (type === "wall") {
+    // FA walls are modular (Corner/Straight/Joint/Connector). Random mixing
+    // looks chaotic. Filter to only Straight 1x1 pieces for a clean uniform
+    // wall look. Falls back to all walls if the filter is too restrictive.
+    const all = get(M.objects, "wall");
+    const straights = all.filter((s) =>
+      /Straight_[A-Z]?_?1x1\./i.test(s.url) ||
+      /Straight_.*_1x1\./i.test(s.url)
+    );
+    return straights.length > 0 ? straights : all;
+  }
   const terrainKey = SPECIAL_FROM_TERRAIN[type];
   if (terrainKey) {
-    const fromTerrain = M.terrain[terrainKey] ?? [];
+    const fromTerrain = get(M.terrain, terrainKey);
     if (fromTerrain.length) return fromTerrain;
   }
   switch (type) {
-    case "wall":
-      return M.objects.wall ?? [];
     case "forest":
-      // Use tree sprites as forest tiles if no dedicated forest tile texture
-      return M.objects.tree ?? [];
+      return get(M.objects, "tree");
     case "road":
-      return M.terrain.dirt ?? []; // fallback approximation
+      return get(M.terrain, "dirt");
     case "void":
-      return []; // always procedural
+      return [];
     default:
       return [];
   }

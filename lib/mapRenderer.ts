@@ -1,7 +1,13 @@
 "use client";
 
 import { getSpriteSync, loadSprite, prefetch, spriteStats } from "./spriteLoader";
-import { allSpriteUrls, pickVariant, SPRITES } from "./sprites";
+import { allSpriteUrls, pickVariant, SPRITES, type Sprite } from "./sprites";
+import {
+  filterByFloorMaterial,
+  filterByWoodPalette,
+  filterByStonePalette,
+  filterByChestContents
+} from "./materials";
 import type {
   BackgroundTile,
   MapData,
@@ -122,7 +128,8 @@ export function renderMap(
 
 export async function renderToExportCanvas(
   map: MapData,
-  tileSize = 64
+  tileSize = 64,
+  opts: { showGrid?: boolean } = {}
 ): Promise<HTMLCanvasElement> {
   const canvas = document.createElement("canvas");
   canvas.width = map.width * tileSize;
@@ -133,66 +140,72 @@ export async function renderToExportCanvas(
   ctx.imageSmoothingEnabled = false;
   const computed = computeLayers(map);
   await Promise.all(spritesUsedByMap(map, computed).map(loadSprite));
-  paint(ctx, map, tileSize, computed, true, false);
+  paint(ctx, map, tileSize, computed, opts.showGrid ?? true, false);
   return canvas;
 }
 
 /** Walks the map and returns the unique set of sprite URLs that will be drawn. */
 function spritesUsedByMap(map: MapData, layers: ComputedLayers): string[] {
   const urls = new Set<string>();
+  const mapSeed = hashString(map.title || "x");
 
-  // Background (only for outdoor maps; dungeons use solid dark)
+  // Wall sprite (used for both dungeon background and computed walls)
+  const wallPool = filterByStonePalette(SPRITES.special.wall, map.wall_palette);
+  if (wallPool.length > 0) {
+    urls.add(wallPool[mapSeed % wallPool.length].url);
+  }
+
+  // Outdoor background terrain (uniform)
   const isDungeon = map.map_type === "dungeon";
-  if (!isDungeon) {
-    const variants = SPRITES.terrain[map.background_tile];
-    if (variants && variants.length) {
-      for (let y = 0; y < map.height; y++) {
-        for (let x = 0; x < map.width; x++) {
-          const u = pickVariant(variants, x, y);
-          if (u) urls.add(u);
-        }
-      }
+  const bgVariants = SPRITES.terrain[map.background_tile];
+  if (!isDungeon && bgVariants && bgVariants.length > 0) {
+    urls.add(bgVariants[mapSeed % bgVariants.length].url);
+  }
+
+  // Per-room floor (filtered by floor_material)
+  for (let i = 0; i < map.rooms.length; i++) {
+    const room = map.rooms[i];
+    const baseCategory = floorCategoryFor(room.floor_material, map.background_tile);
+    const baseVariants = SPRITES.terrain[baseCategory] ?? [];
+    const pool = filterByFloorMaterial(baseVariants, room.floor_material);
+    if (pool.length > 0) {
+      urls.add(pool[(mapSeed + i * 17) % pool.length].url);
     }
   }
 
-  // Interior floors
-  const floorVariants = SPRITES.terrain[map.background_tile];
-  if (floorVariants && floorVariants.length) {
-    for (let y = 0; y < map.height; y++) {
-      for (let x = 0; x < map.width; x++) {
-        if (!layers.interior[y * map.width + x]) continue;
-        const u = pickVariant(floorVariants, x, y);
-        if (u) urls.add(u);
-      }
-    }
+  // Corridor floor (map default)
+  const corridorVariants = SPRITES.terrain[map.background_tile] ?? [];
+  if (corridorVariants.length > 0) {
+    urls.add(corridorVariants[(mapSeed + 7) % corridorVariants.length].url);
   }
 
-  // Computed walls (around all walkable tiles)
-  const wallVariants = SPRITES.special.wall;
-  if (wallVariants && wallVariants.length) {
-    for (const w of layers.walls) {
-      const u = pickVariant(wallVariants, w.x, w.y);
-      if (u) urls.add(u);
-    }
-  }
-
-  // LLM-defined special tiles (water, lava, etc.)
+  // LLM-defined special tiles (water, lava, road, forest)
   for (const s of map.special_tiles) {
     if (s.type === "wall") continue;
     const variants = SPRITES.special[s.type];
     if (variants && variants.length) {
-      const u = pickVariant(variants, s.x, s.y);
-      if (u) urls.add(u);
+      const v = pickVariant(variants, s.x, s.y);
+      if (v) urls.add(v.url);
     }
   }
 
-  // Objects
+  // Objects (with same material filtering as drawObjects)
   for (const o of map.objects) {
-    const variants = SPRITES.objects[o.type as ObjectType];
-    if (variants && variants.length) {
-      const u = pickVariant(variants, o.x, o.y);
-      if (u) urls.add(u);
+    let pool = SPRITES.objects[o.type as ObjectType] ?? [];
+    if (pool.length === 0) continue;
+    if (WOOD_TYPED.has(o.type as ObjectType)) {
+      const ri = layers.roomIndex[o.y * map.width + o.x];
+      const room = ri >= 0 ? map.rooms[ri] : undefined;
+      if (room?.wood_palette) pool = filterByWoodPalette(pool, room.wood_palette);
     }
+    if (o.type === "chest" && o.contents) {
+      pool = filterByChestContents(pool, o.contents);
+    }
+    if (o.type === "pillar" && map.wall_palette) {
+      pool = filterByStonePalette(pool, map.wall_palette);
+    }
+    const v = pool.length > 0 ? pickVariant(pool, o.x, o.y) : undefined;
+    if (v) urls.add(v.url);
   }
 
   return Array.from(urls);
@@ -315,55 +328,95 @@ function paint(
   showGrid: boolean,
   showBadges: boolean
 ) {
-  drawBackground(ctx, map, ts);
-  drawSpecialTiles(ctx, map, ts, layers);
-  drawCorridorAndRoomFloors(ctx, map, ts, layers);
+  // For each render, pick a SINGLE wall sprite for the whole map so the
+  // "carved-in-rock" background and the wall outlines use the same look.
+  // Filter by wall_palette if the LLM specified one for thematic cohesion.
+  const mapSeed = hashString(map.title || "x");
+  const wallPool = filterByStonePalette(SPRITES.special.wall, map.wall_palette);
+  const wallSprite =
+    wallPool.length > 0 ? wallPool[mapSeed % wallPool.length] : undefined;
+
+  drawBackground(ctx, map, ts, layers, wallSprite, mapSeed);
+  drawCorridorAndRoomFloors(ctx, map, ts, layers, mapSeed);
   drawScatterDecoration(ctx, map, ts, layers);
   drawRoomTint(ctx, map, ts);
-  drawWalls(ctx, map, ts, layers);
-  drawObjects(ctx, map, ts);
+  drawSpecialTiles(ctx, map, ts, layers);
+  drawWalls(ctx, map, ts, layers, wallSprite);
+  drawObjects(ctx, map, ts, layers);
   if (showGrid) drawGrid(ctx, map, ts);
   drawVignette(ctx, map, ts);
   if (showBadges) drawRoomBadges(ctx, map, ts);
 }
 
+function hashString(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  }
+  return h >>> 0;
+}
+
+/**
+ * Maps a semantic floor material (e.g. "marble", "wood_aged") back to the
+ * BackgroundTile category that contains its sprites. Lets a single room
+ * switch its terrain category independently of the map's default.
+ */
+function floorCategoryFor(
+  material: string | undefined,
+  fallback: BackgroundTile
+): BackgroundTile {
+  if (!material) return fallback;
+  if (/wood/i.test(material)) return "wood_floor";
+  if (/grass/i.test(material)) return "grass";
+  if (
+    /dirt|gravel|rocky|cave_floor|grassy_dirt/i.test(material)
+  )
+    return "dirt";
+  if (/herringbone|rectangular_tiles|flat_stones|marble/i.test(material))
+    return "stone_floor";
+  return fallback;
+}
+
 function drawBackground(
   ctx: CanvasRenderingContext2D,
   map: MapData,
-  ts: number
+  ts: number,
+  layers: ComputedLayers,
+  wallSprite: Sprite | undefined,
+  mapSeed: number
 ) {
-  // Background = "outside" texture. For dungeons we want darkness (void),
-  // for overworld/town we want the terrain.
   const isDungeon = map.map_type === "dungeon";
   if (isDungeon) {
+    // "Carved into rock" look: fill ALL non-interior tiles with the wall
+    // sprite. This gives the dungeon a solid stone surrounding instead of
+    // floating rooms in a black void.
     ctx.fillStyle = "#0a0a14";
     ctx.fillRect(0, 0, ts * map.width, ts * map.height);
-    // subtle outer dust texture
-    ctx.save();
-    ctx.globalAlpha = 0.05;
+    const wallImg = wallSprite ? getCachedSprite(wallSprite.url) : null;
     for (let y = 0; y < map.height; y++) {
       for (let x = 0; x < map.width; x++) {
-        if ((((x * 928371) ^ (y * 12831)) >>> 0) % 23 === 0) {
-          ctx.fillStyle = "#ffffff";
-          ctx.fillRect(x * ts, y * ts, ts, ts);
+        if (layers.interior[y * map.width + x]) continue;
+        if (wallImg) {
+          ctx.drawImage(wallImg, x * ts, y * ts, ts, ts);
+        } else {
+          proceduralWallTile(ctx, x, y, ts);
         }
       }
     }
-    ctx.restore();
     return;
   }
-  // For outdoor map types use the terrain everywhere as the base
+  // Outdoor maps: tile a SINGLE terrain variant across the whole map.
+  // (We were picking per-tile randomly which mixed dirt + grass + cracked
+  // looking nothing like a real meadow / town floor.)
   const variants = SPRITES.terrain[map.background_tile];
-  if (variants && variants.length > 0) {
+  const bgSprite = variants && variants.length
+    ? variants[mapSeed % variants.length]
+    : undefined;
+  const bgImg = bgSprite ? getCachedSprite(bgSprite.url) : null;
+  if (bgImg) {
     for (let y = 0; y < map.height; y++) {
       for (let x = 0; x < map.width; x++) {
-        const url = pickVariant(variants, x, y);
-        const sprite = url ? getCachedSprite(url) : null;
-        if (sprite) ctx.drawImage(sprite, x * ts, y * ts, ts, ts);
-        else {
-          ctx.fillStyle = TILE_COLORS[map.background_tile];
-          ctx.fillRect(x * ts, y * ts, ts, ts);
-        }
+        ctx.drawImage(bgImg, x * ts, y * ts, ts, ts);
       }
     }
   } else {
@@ -379,13 +432,12 @@ function drawSpecialTiles(
   layers: ComputedLayers
 ) {
   for (const s of map.special_tiles) {
-    // skip wall tiles from the LLM — we compute walls ourselves now
-    if (s.type === "wall") continue;
+    if (s.type === "wall") continue; // computed walls handled separately
     const variants = SPRITES.special[s.type];
-    const url = variants ? pickVariant(variants, s.x, s.y) : undefined;
-    const sprite = url ? getCachedSprite(url) : null;
-    if (sprite) {
-      ctx.drawImage(sprite, s.x * ts, s.y * ts, ts, ts);
+    const v = variants ? pickVariant(variants, s.x, s.y) : undefined;
+    const img = v ? getCachedSprite(v.url) : null;
+    if (img) {
+      ctx.drawImage(img, s.x * ts, s.y * ts, ts, ts);
     } else {
       proceduralSpecial(ctx, s.x, s.y, s.type, ts);
     }
@@ -396,19 +448,43 @@ function drawCorridorAndRoomFloors(
   ctx: CanvasRenderingContext2D,
   map: MapData,
   ts: number,
-  layers: ComputedLayers
+  layers: ComputedLayers,
+  mapSeed: number
 ) {
-  const variants = SPRITES.terrain[map.background_tile];
+  // Pick ONE terrain variant per room. The pool is FILTERED by the room's
+  // declared floor_material — so a room asking for "marble" only picks marble
+  // sprites, "cracked_dirt" only cracked dirt, etc.
+  const fallbackColor = TILE_COLORS[map.background_tile] ?? "#3a3a4a";
+
+  const perRoom: (Sprite | undefined)[] = [];
+  for (let i = 0; i < map.rooms.length; i++) {
+    const room = map.rooms[i];
+    // The room can switch its base terrain via floor_material's category hint.
+    // Default to the map's background_tile category.
+    const baseCategory = floorCategoryFor(room.floor_material, map.background_tile);
+    const baseVariants = SPRITES.terrain[baseCategory] ?? [];
+    const pool = filterByFloorMaterial(baseVariants, room.floor_material);
+    perRoom[i] = pool.length > 0 ? pool[(mapSeed + i * 17) % pool.length] : undefined;
+  }
+
+  // Corridors use the map's default terrain, no material filter (neutral).
+  const corridorVariants = SPRITES.terrain[map.background_tile] ?? [];
+  const corridorSprite: Sprite | undefined =
+    corridorVariants.length > 0
+      ? corridorVariants[(mapSeed + 7) % corridorVariants.length]
+      : undefined;
+
   for (let y = 0; y < map.height; y++) {
     for (let x = 0; x < map.width; x++) {
       const i = y * map.width + x;
       if (!layers.interior[i]) continue;
-      const url = variants ? pickVariant(variants, x, y) : undefined;
-      const sprite = url ? getCachedSprite(url) : null;
-      if (sprite) {
-        ctx.drawImage(sprite, x * ts, y * ts, ts, ts);
+      const ri = layers.roomIndex[i];
+      const s = ri >= 0 ? perRoom[ri] : corridorSprite;
+      const img = s ? getCachedSprite(s.url) : null;
+      if (img) {
+        ctx.drawImage(img, x * ts, y * ts, ts, ts);
       } else {
-        ctx.fillStyle = TILE_COLORS[map.background_tile] ?? "#3a3a4a";
+        ctx.fillStyle = fallbackColor;
         ctx.fillRect(x * ts, y * ts, ts, ts);
       }
     }
@@ -494,20 +570,16 @@ function drawWalls(
   ctx: CanvasRenderingContext2D,
   map: MapData,
   ts: number,
-  layers: ComputedLayers
+  layers: ComputedLayers,
+  wallSprite: Sprite | undefined
 ) {
-  const wallVariants = SPRITES.special.wall;
-  const hasSprites = wallVariants && wallVariants.length > 0;
+  const wallImg = wallSprite ? getCachedSprite(wallSprite.url) : null;
   for (const w of layers.walls) {
-    if (hasSprites) {
-      const url = pickVariant(wallVariants, w.x, w.y);
-      const sprite = url ? getCachedSprite(url) : null;
-      if (sprite) {
-        ctx.drawImage(sprite, w.x * ts, w.y * ts, ts, ts);
-        continue;
-      }
+    if (wallImg) {
+      ctx.drawImage(wallImg, w.x * ts, w.y * ts, ts, ts);
+    } else {
+      proceduralWallTile(ctx, w.x, w.y, ts);
     }
-    proceduralWallTile(ctx, w.x, w.y, ts);
   }
   // Inner edge shadow on walkable tiles adjacent to walls
   ctx.save();
@@ -563,38 +635,87 @@ function proceduralWallTile(
   ctx.restore();
 }
 
-function drawObjects(ctx: CanvasRenderingContext2D, map: MapData, ts: number) {
+/** Object types that should respect the room's wood palette for cohesion. */
+const WOOD_TYPED: ReadonlySet<ObjectType> = new Set<ObjectType>([
+  "chest", "table", "bed", "door", "bookshelf",
+  "barrel", "crate", "seating", "coffin", "treasure"
+]);
+
+function drawObjects(
+  ctx: CanvasRenderingContext2D,
+  map: MapData,
+  ts: number,
+  layers: ComputedLayers
+) {
   for (const o of map.objects) {
-    const variants = SPRITES.objects[o.type as ObjectType];
-    const url = variants ? pickVariant(variants, o.x, o.y) : undefined;
-    const sprite = url ? getCachedSprite(url) : null;
+    let variants = SPRITES.objects[o.type as ObjectType] ?? [];
 
-    // shadow
-    ctx.save();
-    ctx.fillStyle = "rgba(0,0,0,0.45)";
-    ctx.beginPath();
-    ctx.ellipse(
-      o.x * ts + ts / 2,
-      o.y * ts + ts * 0.80,
-      ts * 0.32,
-      ts * 0.10,
-      0,
-      0,
-      Math.PI * 2
-    );
-    ctx.fill();
-    ctx.restore();
+    // Material filtering for thematic cohesion
+    if (variants.length > 0) {
+      // 1) Wood palette — look up the room this object is in
+      if (WOOD_TYPED.has(o.type as ObjectType)) {
+        const ri = layers.roomIndex[o.y * map.width + o.x];
+        const room = ri >= 0 ? map.rooms[ri] : undefined;
+        if (room?.wood_palette) {
+          variants = filterByWoodPalette(variants, room.wood_palette);
+        }
+      }
+      // 2) Chest contents
+      if (o.type === "chest" && o.contents) {
+        variants = filterByChestContents(variants, o.contents);
+      }
+      // 3) Pillar stone palette inherits the map's wall_palette
+      if (o.type === "pillar" && map.wall_palette) {
+        variants = filterByStonePalette(variants, map.wall_palette);
+      }
+    }
 
-    if (sprite) {
-      const rot = ((((o.x * 31 + o.y * 17) >>> 0) % 13) - 6) * (Math.PI / 180);
-      const scale = 0.92 + (((o.x * 7 + o.y * 13) >>> 0) % 14) * 0.005;
+    const v = variants.length > 0 ? pickVariant(variants, o.x, o.y) : undefined;
+    const img = v ? getCachedSprite(v.url) : null;
+
+    if (img && v) {
+      // Sprite carries natural tile dimensions. Anchor convention: (o.x, o.y)
+      // is the top-left tile of the sprite's footprint. The sprite extends
+      // right (v.w tiles) and down (v.h tiles) from there. This keeps small
+      // 1x1 objects in their own tile and lets 2x2/5x5 sprites span properly.
+      const dw = v.w * ts;
+      const dh = v.h * ts;
+      const dx = o.x * ts;
+      const dy = o.y * ts;
+
+      // soft drop shadow (footprint ellipse under the sprite)
       ctx.save();
-      ctx.translate(o.x * ts + ts / 2, o.y * ts + ts / 2);
-      ctx.rotate(rot);
-      const sz = ts * scale;
-      ctx.drawImage(sprite, -sz / 2, -sz / 2, sz, sz);
+      ctx.fillStyle = "rgba(0,0,0,0.40)";
+      ctx.beginPath();
+      ctx.ellipse(
+        dx + dw / 2,
+        dy + dh - ts * 0.18,
+        dw * 0.40,
+        Math.max(4, ts * 0.10),
+        0,
+        0,
+        Math.PI * 2
+      );
+      ctx.fill();
       ctx.restore();
+
+      ctx.drawImage(img, dx, dy, dw, dh);
     } else {
+      // shadow + procedural fallback
+      ctx.save();
+      ctx.fillStyle = "rgba(0,0,0,0.45)";
+      ctx.beginPath();
+      ctx.ellipse(
+        o.x * ts + ts / 2,
+        o.y * ts + ts * 0.80,
+        ts * 0.32,
+        ts * 0.10,
+        0,
+        0,
+        Math.PI * 2
+      );
+      ctx.fill();
+      ctx.restore();
       proceduralObject(ctx, o, ts);
     }
   }

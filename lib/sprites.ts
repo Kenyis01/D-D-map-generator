@@ -1,12 +1,9 @@
 /**
- * Sprite library config. URLs point to CC0/CC-BY painted top-down assets
- * hosted on GitHub raw CDN.
+ * Sprite library: structured map of {url, w, h} entries per type.
  *
- * Multiple variants per type → renderer picks pseudo-randomly seeded by tile coord
- * for visual variation.
- *
- * NOTE: URLs are populated dynamically — see lib/spriteUrls.ts for the actual
- * sources. This file just exposes the structured config.
+ * Each sprite carries its natural tile dimensions (parsed from FA's _WxH
+ * filename suffix at manifest-build time). The renderer respects these so a
+ * 2x2 round table actually covers 2x2 tiles instead of being squished into 1.
  */
 import { SPRITE_URLS } from "./spriteUrls";
 import type {
@@ -16,34 +13,41 @@ import type {
   SpecialTileType
 } from "./types";
 
+export interface Sprite {
+  url: string;
+  w: number; // natural width in tiles
+  h: number; // natural height in tiles
+}
+
 export interface SpriteLibrary {
-  terrain: Record<BackgroundTile, string[]>;
-  special: Record<SpecialTileType, string[]>;
-  objects: Record<ObjectType, string[]>;
-  roomFloor: Partial<Record<RoomType, string[]>>;
+  terrain: Record<BackgroundTile, Sprite[]>;
+  special: Record<SpecialTileType, Sprite[]>;
+  objects: Record<ObjectType, Sprite[]>;
+  roomFloor: Partial<Record<RoomType, Sprite[]>>;
 }
 
 export const SPRITES: SpriteLibrary = SPRITE_URLS;
 
-/** Pick a deterministic variant for a tile based on (x,y) so re-renders are stable. */
-export function pickVariant<T>(arr: readonly T[] | undefined, x: number, y: number): T | undefined {
+/**
+ * Deterministic variant picker. Seeded by (a, b) coords so repeat renders
+ * produce identical layouts. Use roomIndex for cohesive per-room textures,
+ * or tile (x,y) for per-tile randomness.
+ */
+export function pickVariant<T>(arr: readonly T[] | undefined, a: number, b: number): T | undefined {
   if (!arr || arr.length === 0) return undefined;
-  const h = ((x * 73856093) ^ (y * 19349663)) >>> 0;
+  const h = ((a * 73856093) ^ (b * 19349663)) >>> 0;
   return arr[h % arr.length];
 }
 
-/** Flatten all URLs in the library — used to prefetch on first paint. */
+/** Flatten all sprite URLs in the library — used to prefetch on first paint. */
 export function allSpriteUrls(): string[] {
   const out: string[] = [];
-  const groups: Record<string, string[]>[] = [
-    SPRITES.terrain as unknown as Record<string, string[]>,
-    SPRITES.special as unknown as Record<string, string[]>,
-    SPRITES.objects as unknown as Record<string, string[]>,
-    SPRITES.roomFloor as unknown as Record<string, string[]>
-  ];
+  const groups = [SPRITES.terrain, SPRITES.special, SPRITES.objects, SPRITES.roomFloor];
   for (const g of groups) {
     for (const arr of Object.values(g)) {
-      if (Array.isArray(arr)) out.push(...arr);
+      if (Array.isArray(arr)) {
+        for (const s of arr) out.push(s.url);
+      }
     }
   }
   return Array.from(new Set(out));
