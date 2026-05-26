@@ -21,7 +21,7 @@ interface Props {
 }
 
 const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
-  { map, showGrid = true, showBadges = true, className, tileSize },
+  { map, showGrid = true, showBadges = false, className, tileSize },
   ref
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);

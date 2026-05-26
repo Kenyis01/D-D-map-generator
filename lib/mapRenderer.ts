@@ -124,7 +124,7 @@ export async function renderToExportCanvas(
   ctx.imageSmoothingEnabled = false;
   await Promise.all(allSpriteUrls().map(loadSprite));
   const computed = computeLayers(map);
-  paint(ctx, map, tileSize, computed, true, true);
+  paint(ctx, map, tileSize, computed, true, false);
   return canvas;
 }
 

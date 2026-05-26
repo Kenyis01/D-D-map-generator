@@ -4,7 +4,6 @@ import { useRef, useState } from "react";
 import MapCanvas, { MapCanvasHandle } from "./MapCanvas";
 import MapTypePicker from "./MapTypePicker";
 import AspectRatioPicker, { ASPECT_OPTIONS } from "./AspectRatioPicker";
-import RoomLegend from "./RoomLegend";
 import { supabase, THUMBNAIL_BUCKET } from "@/lib/supabase";
 import type { AspectRatioOption, MapData, MapType } from "@/lib/types";
 
@@ -187,11 +186,8 @@ export default function GeneratorForm() {
             {map.theme && (
               <p className="text-sm text-muted">Tema: {map.theme}</p>
             )}
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_220px]">
-              <div className="h-[640px]">
-                <MapCanvas ref={canvasRef} map={map} />
-              </div>
-              <RoomLegend map={map} />
+            <div className="h-[640px]">
+              <MapCanvas ref={canvasRef} map={map} />
             </div>
           </div>
         ) : (
