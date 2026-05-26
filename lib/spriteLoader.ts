@@ -1,11 +1,13 @@
 "use client";
 
 /**
- * Image cache for sprite loading. All sprites are loaded once and reused.
- * Exposes both async (Promise) and sync lookup.
+ * Image cache for sprite loading. Async + sync access.
  */
 const promiseCache = new Map<string, Promise<HTMLImageElement | null>>();
 const syncCache = new Map<string, HTMLImageElement>();
+
+let loaded = 0;
+let failed = 0;
 
 export function loadSprite(url: string): Promise<HTMLImageElement | null> {
   if (promiseCache.has(url)) return promiseCache.get(url)!;
@@ -15,13 +17,21 @@ export function loadSprite(url: string): Promise<HTMLImageElement | null> {
       return;
     }
     const img = new Image();
-    img.crossOrigin = "anonymous";
+    // Only set crossOrigin for absolute (cross-origin) URLs.
+    // Same-origin /public assets don't need (and often break with) CORS attribute.
+    if (/^https?:\/\//i.test(url)) {
+      img.crossOrigin = "anonymous";
+    }
     img.onload = () => {
       syncCache.set(url, img);
+      loaded++;
       resolve(img);
     };
     img.onerror = () => {
-      if (typeof console !== "undefined") console.warn("sprite failed", url);
+      failed++;
+      if (typeof console !== "undefined" && failed <= 5) {
+        console.warn("[sprite] failed:", url);
+      }
       resolve(null);
     };
     img.src = url;
@@ -30,7 +40,6 @@ export function loadSprite(url: string): Promise<HTMLImageElement | null> {
   return p;
 }
 
-/** Synchronous lookup — returns the image only if already decoded, null otherwise. */
 export function getSpriteSync(url: string): HTMLImageElement | null {
   return syncCache.get(url) ?? null;
 }
@@ -39,7 +48,10 @@ export async function loadSprites(urls: string[]): Promise<(HTMLImageElement | n
   return Promise.all(urls.map(loadSprite));
 }
 
-/** Pre-warm cache with a list of URLs without awaiting (fire and forget). */
 export function prefetch(urls: string[]) {
   urls.forEach((u) => loadSprite(u));
+}
+
+export function spriteStats() {
+  return { loaded, failed, requested: promiseCache.size };
 }

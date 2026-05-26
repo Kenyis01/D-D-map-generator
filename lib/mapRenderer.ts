@@ -1,6 +1,6 @@
 "use client";
 
-import { getSpriteSync, loadSprite, prefetch } from "./spriteLoader";
+import { getSpriteSync, loadSprite, prefetch, spriteStats } from "./spriteLoader";
 import { allSpriteUrls, pickVariant, SPRITES } from "./sprites";
 import type {
   BackgroundTile,
@@ -103,7 +103,15 @@ export function renderMap(
   paint(ctx, map, tileSize, computed, opts.showGrid ?? true, opts.showBadges ?? true);
 
   // Only load the sprites this specific map needs (not the whole library)
-  Promise.all(spritesUsedByMap(map, computed).map(loadSprite)).then(() => {
+  const needed = spritesUsedByMap(map, computed);
+  if (typeof console !== "undefined") {
+    console.info(`[map] requesting ${needed.length} sprites`);
+  }
+  Promise.all(needed.map(loadSprite)).then(() => {
+    if (typeof console !== "undefined") {
+      const s = spriteStats();
+      console.info(`[map] sprites loaded: ${s.loaded} ok, ${s.failed} failed, ${s.requested} requested`);
+    }
     const ctx2 = canvas.getContext("2d");
     if (!ctx2) return;
     ctx2.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -159,7 +167,16 @@ function spritesUsedByMap(map: MapData, layers: ComputedLayers): string[] {
     }
   }
 
-  // Special tiles
+  // Computed walls (around all walkable tiles)
+  const wallVariants = SPRITES.special.wall;
+  if (wallVariants && wallVariants.length) {
+    for (const w of layers.walls) {
+      const u = pickVariant(wallVariants, w.x, w.y);
+      if (u) urls.add(u);
+    }
+  }
+
+  // LLM-defined special tiles (water, lava, etc.)
   for (const s of map.special_tiles) {
     if (s.type === "wall") continue;
     const variants = SPRITES.special[s.type];
@@ -479,7 +496,17 @@ function drawWalls(
   ts: number,
   layers: ComputedLayers
 ) {
+  const wallVariants = SPRITES.special.wall;
+  const hasSprites = wallVariants && wallVariants.length > 0;
   for (const w of layers.walls) {
+    if (hasSprites) {
+      const url = pickVariant(wallVariants, w.x, w.y);
+      const sprite = url ? getCachedSprite(url) : null;
+      if (sprite) {
+        ctx.drawImage(sprite, w.x * ts, w.y * ts, ts, ts);
+        continue;
+      }
+    }
     proceduralWallTile(ctx, w.x, w.y, ts);
   }
   // Inner edge shadow on walkable tiles adjacent to walls
