@@ -4,6 +4,9 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { renderMap, renderToExportCanvas } from "@/lib/mapRenderer";
 import type { MapData } from "@/lib/types";
 
+const MIN_TILE_SIZE = 32; // never render tiles smaller than this on screen
+const MAX_TILE_SIZE = 56; // cap so a 24-tile map doesn't get cartoonishly huge on big screens
+
 export interface MapCanvasHandle {
   toBlob: (type?: string, quality?: number) => Promise<Blob | null>;
   toDataURL: (type?: string) => string | null;
@@ -19,7 +22,7 @@ interface Props {
   showGrid?: boolean;
   showBadges?: boolean;
   className?: string;
-  /** Optional fixed tile size in CSS pixels (otherwise fits container). */
+  /** Optional fixed tile size in CSS pixels (otherwise auto). */
   tileSize?: number;
 }
 
@@ -39,8 +42,10 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
       if (!canvas || !wrap) return;
       const w = wrap.clientWidth;
       const h = wrap.clientHeight;
-      const ts =
-        tileSize ?? Math.floor(Math.min(w / map.width, h / map.height));
+      // Try to fit, but never go below MIN_TILE_SIZE (the wrapper just
+      // scrolls if the map doesn't fit on screen) and never above MAX.
+      const fitTs = Math.floor(Math.min(w / map.width, h / map.height));
+      const ts = tileSize ?? Math.max(MIN_TILE_SIZE, Math.min(MAX_TILE_SIZE, fitTs));
       canvas.style.width = `${ts * map.width}px`;
       canvas.style.height = `${ts * map.height}px`;
       renderMap(canvas, map, { tileSize: ts, showGrid, showBadges });
@@ -72,15 +77,20 @@ const MapCanvas = forwardRef<MapCanvasHandle, Props>(function MapCanvas(
     [map]
   );
 
+  // Wrapper's aspect ratio matches the map's so there's no big black space
+  // top/bottom (or left/right) when the map shape differs from the viewport.
+  const aspect = `${map.width} / ${map.height}`;
+
   return (
     <div
       ref={wrapperRef}
+      style={{ aspectRatio: aspect }}
       className={
-        "relative flex h-full w-full items-center justify-center overflow-auto rounded-md border border-border bg-black/40 p-2 " +
+        "relative flex w-full items-start justify-start overflow-auto rounded-md border border-border bg-black/40 p-2 " +
         (className ?? "")
       }
     >
-      <canvas ref={canvasRef} className="block max-w-full" />
+      <canvas ref={canvasRef} className="block" />
     </div>
   );
 });

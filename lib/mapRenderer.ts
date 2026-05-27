@@ -575,17 +575,17 @@ function drawEdgeWalls(
   // stroke along that edge. Adjacent tiles' strokes meet seamlessly forming
   // continuous walls, T-junctions and corners — no autotiling needed.
   const colors = paletteColors(map.wall_palette);
-  const thick = Math.max(3, ts * 0.18);
+  const thick = Math.max(5, ts * 0.26);
   const halfT = thick / 2;
-  const inner = Math.max(1, ts * 0.04);
+  const inner = Math.max(2, ts * 0.06);
 
   ctx.save();
   ctx.lineCap = "butt";
   ctx.lineJoin = "miter";
 
-  // First pass: shadow underline (offset down 1px for a baked-shadow effect)
-  ctx.strokeStyle = "rgba(0,0,0,0.55)";
-  ctx.lineWidth = thick + 2;
+  // First pass: shadow underline
+  ctx.strokeStyle = "rgba(0,0,0,0.65)";
+  ctx.lineWidth = thick + 3;
   drawWallStrokes(ctx, map, layers, ts, halfT);
 
   // Second pass: the wall itself

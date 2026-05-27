@@ -95,16 +95,15 @@ export const PURPOSE_RULES: Record<RoomPurpose, PurposeRules> = {
 
   library: {
     required: [
-      // Bookshelves cover ≥65% of perimeter (rulebook 5.1)
       { type: "bookshelf", count: 1, placement: "wall_continuous", coverage: 0.7 },
-      { type: "table", count: 1, placement: "center" },
+      { type: "table", count: { perTiles: 20, min: 1, max: 3 }, placement: "interior_open" },
       { type: "seating", count: 2, placement: "around", anchor: "table" },
       { type: "rug", count: 1, placement: "center" }
     ],
     optional: [
-      { type: "candle", count: 2, placement: "wall", prob: 1 },
-      { type: "chest", count: 1, placement: "wall", prob: 0.5, contents: "empty" },
-      { type: "statue", count: 1, placement: "wall", prob: 0.3 }
+      { type: "candle", count: { perTiles: 14, min: 2, max: 5 }, placement: "wall", prob: 1 },
+      { type: "chest", count: 1, placement: "wall", prob: 0.6, contents: "empty" },
+      { type: "statue", count: 1, placement: "wall", prob: 0.4 }
     ],
     lightsPerTiles: 6,
     lightType: "candle"
@@ -126,22 +125,17 @@ export const PURPOSE_RULES: Record<RoomPurpose, PurposeRules> = {
 
   tavern_main: {
     required: [
-      // Bar: continuous "table" along one long wall covering 40%.
       { type: "table", count: 1, placement: "wall_continuous", coverage: 0.4 },
-      // Storage barrels piled in the far corner from the entrance (rulebook 6.6)
-      { type: "barrel", count: 4, placement: "cluster_far_corner" },
-      // Dining tables: 1 per ~12 interior tiles, NEVER touching walls
-      { type: "table", count: { perTiles: 12, min: 2, max: 5 }, placement: "interior_open" },
-      // Hearth opposite the bar (rulebook 6.5)
+      { type: "barrel", count: { perTiles: 10, min: 3, max: 6 }, placement: "cluster_far_corner" },
+      { type: "table", count: { perTiles: 12, min: 2, max: 6 }, placement: "interior_open" },
       { type: "fireplace", count: 1, placement: "wall_opposite", anchor: "table" },
       { type: "rug", count: 1, placement: "center" }
     ],
     optional: [
-      // Seating around each dining table (the placer hooks into "around" anchor)
       { type: "seating", count: 4, placement: "around", anchor: "table", prob: 1 },
-      { type: "crate", count: 2, placement: "wall", prob: 0.8 },
+      { type: "crate", count: { perTiles: 14, min: 2, max: 4 }, placement: "wall", prob: 0.8 },
       { type: "bookshelf", count: 1, placement: "wall", prob: 0.4 },
-      { type: "lantern", count: 2, placement: "wall", prob: 0.7 }
+      { type: "lantern", count: { perTiles: 16, min: 2, max: 4 }, placement: "wall", prob: 0.8 }
     ],
     lightsPerTiles: 6,
     lightType: "lantern"
@@ -149,17 +143,16 @@ export const PURPOSE_RULES: Record<RoomPurpose, PurposeRules> = {
 
   kitchen: {
     required: [
-      // Counter along one wall covering 60%.
       { type: "table", count: 1, placement: "wall_continuous", coverage: 0.6 },
       { type: "fireplace", count: 1, placement: "wall" },
-      { type: "barrel", count: 3, placement: "wall" },
-      { type: "table", count: 1, placement: "interior_open" } // prep table
+      { type: "barrel", count: { perTiles: 10, min: 3, max: 5 }, placement: "wall" },
+      { type: "table", count: 1, placement: "interior_open" }
     ],
     optional: [
-      { type: "crate", count: 2, placement: "wall", prob: 0.8 },
-      { type: "bookshelf", count: 1, placement: "wall", prob: 0.4 },
-      { type: "candle", count: 2, placement: "wall", prob: 0.8 },
-      { type: "seating", count: 1, placement: "around", anchor: "table", prob: 0.5 }
+      { type: "crate", count: { perTiles: 12, min: 2, max: 4 }, placement: "wall", prob: 0.8 },
+      { type: "bookshelf", count: 1, placement: "wall", prob: 0.5 },
+      { type: "candle", count: { perTiles: 12, min: 2, max: 4 }, placement: "wall", prob: 0.9 },
+      { type: "seating", count: 1, placement: "around", anchor: "table", prob: 0.6 }
     ],
     lightsPerTiles: 6,
     lightType: "candle"
@@ -243,14 +236,14 @@ export const PURPOSE_RULES: Record<RoomPurpose, PurposeRules> = {
 
   chamber: {
     required: [
-      { type: "pillar", count: 4, placement: "corners" },
+      { type: "pillar", count: { perTiles: 8, min: 4, max: 10 }, placement: "wall" },
       { type: "rug", count: 1, placement: "center" }
     ],
     optional: [
-      { type: "brazier", count: 2, placement: "wall", prob: 0.7 },
-      { type: "candle", count: 2, placement: "wall", prob: 0.8 },
+      { type: "brazier", count: { perTiles: 18, min: 2, max: 4 }, placement: "wall", prob: 0.8 },
+      { type: "candle", count: { perTiles: 12, min: 2, max: 4 }, placement: "wall", prob: 0.9 },
       { type: "bones", count: 1, placement: "wall", prob: 0.5 },
-      { type: "statue", count: 1, placement: "wall", prob: 0.5 },
+      { type: "statue", count: 1, placement: "wall", prob: 0.6 },
       { type: "bookshelf", count: 1, placement: "wall", prob: 0.4 },
       { type: "table", count: 1, placement: "wall", prob: 0.4 }
     ],
@@ -287,14 +280,14 @@ export const PURPOSE_RULES: Record<RoomPurpose, PurposeRules> = {
   shop: {
     required: [
       { type: "table", count: 1, placement: "wall_continuous", coverage: 0.4 },
-      { type: "bookshelf", count: 2, placement: "wall" },
-      { type: "barrel", count: 2, placement: "wall" },
-      { type: "crate", count: 2, placement: "wall" }
+      { type: "bookshelf", count: { perTiles: 12, min: 2, max: 4 }, placement: "wall" },
+      { type: "barrel", count: { perTiles: 14, min: 2, max: 4 }, placement: "wall" },
+      { type: "crate", count: { perTiles: 14, min: 2, max: 4 }, placement: "wall" }
     ],
     optional: [
-      { type: "rug", count: 1, placement: "center", prob: 0.6 },
-      { type: "chest", count: 1, placement: "wall", contents: "empty", prob: 0.7 },
-      { type: "lantern", count: 2, placement: "wall", prob: 0.8 },
+      { type: "rug", count: 1, placement: "center", prob: 0.7 },
+      { type: "chest", count: 1, placement: "wall", contents: "empty", prob: 0.8 },
+      { type: "lantern", count: { perTiles: 12, min: 2, max: 4 }, placement: "wall", prob: 0.9 },
       { type: "seating", count: 1, placement: "wall", prob: 0.6 }
     ],
     lightsPerTiles: 6,

@@ -203,7 +203,7 @@ export default function GeneratorForm() {
             {map.theme && (
               <p className="text-sm text-muted">Tema: {map.theme}</p>
             )}
-            <div className="h-[640px]">
+            <div className="w-full">
               <MapCanvas ref={canvasRef} map={map} showGrid={showGrid} />
             </div>
           </div>
