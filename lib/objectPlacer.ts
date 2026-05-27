@@ -121,7 +121,7 @@ function applyRule(
       placeInteriorOpen(rule, geom, out, reserved, W, count);
       break;
     case "around":
-      placeAround(rule, out, reserved, W, count);
+      placeAround(rule, geom, out, reserved, W, count);
       break;
     case "cluster_far_corner":
       placeClusterFarCorner(rule, room, geom, out, reserved, W, count);
@@ -279,24 +279,41 @@ function placeInteriorOpen(
 
 function placeAround(
   rule: FeatureRule,
+  geom: Geometry,
   out: MapObject[],
   reserved: Set<string>,
   W: number,
   count: number
 ) {
-  const anchor = rule.anchor && out.find((o) => o.type === rule.anchor);
-  if (!anchor) return;
+  if (!rule.anchor) return;
+  // Anchors = all currently-placed objects of the requested type that live
+  // in this room AND are NOT on the perimeter (we don't want chairs around a
+  // wall-mounted bar — only around interior dining tables / desks).
+  const anchors = out.filter((o) => {
+    if (o.type !== rule.anchor) return false;
+    if (!geom.interior.has(o.x + "," + o.y)) return false;
+    // exclude perimeter ring
+    for (const p of geom.perimeter) {
+      if (p.x === o.x && p.y === o.y) return false;
+    }
+    return true;
+  });
+  if (anchors.length === 0) return;
+
   const offsets = [
     { dx: -1, dy: 0 },
     { dx: 1, dy: 0 },
     { dx: 0, dy: -1 },
     { dx: 0, dy: 1 }
   ];
-  let placedN = 0;
-  for (const o of offsets) {
-    if (placedN >= count) break;
-    if (tryPlace(rule.type, anchor.x + o.dx, anchor.y + o.dy, out, reserved, W, rule.contents)) {
-      placedN++;
+  // Place `count` chairs around EACH dining anchor.
+  for (const anchor of anchors) {
+    let placedN = 0;
+    for (const o of offsets) {
+      if (placedN >= count) break;
+      if (tryPlace(rule.type, anchor.x + o.dx, anchor.y + o.dy, out, reserved, W, rule.contents)) {
+        placedN++;
+      }
     }
   }
 }

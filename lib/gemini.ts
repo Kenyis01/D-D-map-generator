@@ -37,7 +37,7 @@ You do NOT pick coordinates. You do NOT pick objects. The placement algorithm us
      forest/field/village outdoors → "outdoor" + "overworld"
      town square / market → "outdoor" + "town"
 
-2. Pick 4 to 7 rooms. Each gets a clear purpose. Avoid duplicates of the same purpose unless the prompt asks for it (e.g. "barracks with 3 bedrooms").
+2. Pick rooms in the target band the user message specifies. Each gets a clear purpose. Duplicates are fine when the prompt implies multiplicity (e.g. "tavern with 3 bedrooms" = 1 tavern_main + 3 bedroom + 1 kitchen + 1 storage). Include support rooms: kitchen, storage, cellar, corridor, entrance.
 
 3. Pick room SIZE based on importance + prompt language:
      "small / closet / cell" → small
@@ -77,9 +77,18 @@ export async function generateMapIntent(opts: {
   height: number;
 }): Promise<MapIntent> {
   const seed = Math.floor(Math.random() * 1_000_000);
+  // Suggest a room count band based on canvas area so big maps don't end up
+  // with 3 tiny rooms and a sea of dead space.
+  const area = opts.width * opts.height;
+  let roomBand = "5-7";
+  if (area >= 700) roomBand = "8-10";
+  else if (area >= 500) roomBand = "7-9";
+  else if (area >= 350) roomBand = "6-8";
+
   const userPrompt = `Generate a D&D battle map intent.
 - target width: ${opts.width} tiles
 - target height: ${opts.height} tiles
+- TARGET ROOM COUNT: ${roomBand} rooms (REQUIRED — produce a number in this range so the BSP layout fills the canvas)
 - user description: ${opts.prompt}
 - variation seed (do not include in output): ${seed}`;
   const text = await callLLM(SCHEMA_DESCRIPTION, userPrompt);
@@ -170,7 +179,7 @@ function sanitizeIntent(m: MapIntent, width: number, height: number): MapIntent 
     rooms: Array.isArray(m.rooms)
       ? m.rooms
           .filter((r) => r && r.id && r.purpose)
-          .slice(0, 8)
+          .slice(0, 12)
       : [],
     connections: Array.isArray(m.connections)
       ? m.connections.filter((c) => c && c.from && c.to)

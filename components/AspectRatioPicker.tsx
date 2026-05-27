@@ -3,10 +3,8 @@
 import type { AspectRatioOption } from "@/lib/types";
 
 export const ASPECT_OPTIONS: AspectRatioOption[] = [
-  { label: "Cuadrado · 20×20", width: 20, height: 20 },
-  { label: "Horizontal · 30×15", width: 30, height: 15 },
-  { label: "Vertical · 15×25", width: 15, height: 25 },
-  { label: "Grande · 40×25", width: 40, height: 25 }
+  { label: "Estándar · 24×18", width: 24, height: 18 },
+  { label: "Grande · 32×24", width: 32, height: 24 }
 ];
 
 interface Props {

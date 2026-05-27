@@ -30,12 +30,13 @@ interface Rect {
   h: number;
 }
 
-// Tile-size ranges per size category. Tuned for a typical 30x15 map.
-const SIZE_RANGES: Record<RoomSize, { wMin: number; wMax: number; hMin: number; hMax: number }> = {
-  small: { wMin: 4, wMax: 5, hMin: 4, hMax: 5 },
-  medium: { wMin: 5, wMax: 7, hMin: 5, hMax: 7 },
-  large: { wMin: 7, wMax: 9, hMin: 6, hMax: 8 },
-  huge: { wMin: 9, wMax: 12, hMin: 8, hMax: 10 }
+// Per-size FILL FRACTION of the assigned BSP leaf. Bigger sizes use more
+// of their leaf so rooms fill the canvas instead of leaving grey dead-space.
+const SIZE_FILL: Record<RoomSize, number> = {
+  small: 0.72,
+  medium: 0.85,
+  large: 0.92,
+  huge: 0.96
 };
 
 // Sorted descending so we assign huge rooms first (greedy).
@@ -198,23 +199,19 @@ function splitRect(r: Rect, seedKey: string): Rect[] {
   return [r];
 }
 
-function fitRoomInLeaf(room: RoomIntent, leaf: Rect, seedKey: string): MapRoom | null {
-  const range = SIZE_RANGES[room.size] ?? SIZE_RANGES.medium;
-  // Cap dimensions by leaf size minus 1-tile margin on each side.
-  const maxW = Math.max(3, leaf.w - 2);
-  const maxH = Math.max(3, leaf.h - 2);
-  const wCap = Math.min(range.wMax, maxW);
-  const hCap = Math.min(range.hMax, maxH);
-  if (wCap < 3 || hCap < 3) return null;
-  const wMin = Math.min(range.wMin, wCap);
-  const hMin = Math.min(range.hMin, hCap);
-  const seed = hash(seedKey);
-  const w = wMin + ((seed >> 4) % (wCap - wMin + 1));
-  const h = hMin + ((seed >> 8) % (hCap - hMin + 1));
-  const xSlack = leaf.w - w - 2;
-  const ySlack = leaf.h - h - 2;
-  const x = leaf.x + 1 + (xSlack > 0 ? (seed >> 12) % (xSlack + 1) : 0);
-  const y = leaf.y + 1 + (ySlack > 0 ? (seed >> 16) % (ySlack + 1) : 0);
+function fitRoomInLeaf(room: RoomIntent, leaf: Rect, _seedKey: string): MapRoom | null {
+  // Rooms FILL their leaf based on size fraction, leaving a 1-tile margin on
+  // each side for the wall band between rooms. Centered inside the leaf.
+  const fill = SIZE_FILL[room.size] ?? SIZE_FILL.medium;
+  // Available leaf area (minus 1-tile wall band each side)
+  const availW = Math.max(3, leaf.w - 2);
+  const availH = Math.max(3, leaf.h - 2);
+  const w = Math.max(3, Math.floor(availW * fill));
+  const h = Math.max(3, Math.floor(availH * fill));
+  if (w < 3 || h < 3) return null;
+  // Center inside the leaf
+  const x = leaf.x + Math.floor((leaf.w - w) / 2);
+  const y = leaf.y + Math.floor((leaf.h - h) / 2);
   return {
     id: room.id,
     x,
