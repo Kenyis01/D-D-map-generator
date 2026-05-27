@@ -140,3 +140,56 @@ export interface AspectRatioOption {
   width: number;
   height: number;
 }
+
+// ============================================================
+// Intent layer: what the LLM produces (no coordinates, no objects)
+// ============================================================
+
+export type RoomPurpose =
+  | "entrance"
+  | "corridor"
+  | "chamber"
+  | "throne"
+  | "treasure"
+  | "boss"
+  | "crypt"
+  | "tavern_main"
+  | "kitchen"
+  | "bedroom"
+  | "library"
+  | "study"
+  | "shop"
+  | "cellar"
+  | "storage"
+  | "shrine"
+  | "barracks"
+  | "open";
+
+export type RoomSize = "small" | "medium" | "large" | "huge";
+
+export interface RoomIntent {
+  id: string;
+  purpose: RoomPurpose;
+  size: RoomSize;
+  label?: string;
+  floor_material?: string;
+  wood_palette?: string;
+}
+
+export interface ConnectionIntent {
+  from: string;
+  to: string;
+}
+
+export interface MapIntent {
+  title: string;
+  theme: string;
+  map_kind: "dungeon" | "building" | "outdoor";
+  map_type: MapType; // legacy compatibility for renderer
+  width: number;
+  height: number;
+  background_tile: BackgroundTile;
+  wall_palette?: string;
+  rooms: RoomIntent[];
+  connections: ConnectionIntent[];
+}

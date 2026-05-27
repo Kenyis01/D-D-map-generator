@@ -89,6 +89,31 @@ const STONE_PATTERNS: Record<StonePalette, RegExp> = {
   marble: /Marble/i
 };
 
+/**
+ * Per-palette colors used to render procedural walls (edge stroke + filled
+ * non-interior carved-rock pattern).
+ *  - stroke:    main wall outline color
+ *  - fill:      "carved rock" background fill for non-interior tiles
+ *  - highlight: thin lighter stroke for bevel effect
+ *  - mortar:    dark interior detail color
+ */
+export const WALL_PALETTE_COLOR: Record<
+  StonePalette,
+  { stroke: string; fill: string; highlight: string; mortar: string }
+> = {
+  earthy: { stroke: "#3a2a18", fill: "#4a3826", highlight: "#7a5a36", mortar: "#1a1208" },
+  redrock: { stroke: "#5a2818", fill: "#6e3a26", highlight: "#a8533a", mortar: "#2a1208" },
+  sandstone: { stroke: "#6a5430", fill: "#9a7e4a", highlight: "#c8a868", mortar: "#3a2a16" },
+  slate: { stroke: "#1f1f2a", fill: "#2c2c38", highlight: "#5a5a72", mortar: "#0a0a14" },
+  volcanic: { stroke: "#0a0808", fill: "#1a1614", highlight: "#3a2820", mortar: "#000" },
+  marble: { stroke: "#a8a09a", fill: "#d8d4c8", highlight: "#f0ece0", mortar: "#6a625a" }
+};
+
+export function paletteColors(palette: string | undefined) {
+  const p = (palette as StonePalette) ?? "earthy";
+  return WALL_PALETTE_COLOR[p] ?? WALL_PALETTE_COLOR.earthy;
+}
+
 // ============================================================
 // Chest variants (loot context)
 // ============================================================

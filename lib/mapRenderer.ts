@@ -6,7 +6,8 @@ import {
   filterByFloorMaterial,
   filterByWoodPalette,
   filterByStonePalette,
-  filterByChestContents
+  filterByChestContents,
+  paletteColors
 } from "./materials";
 import type {
   BackgroundTile,
@@ -328,20 +329,14 @@ function paint(
   showGrid: boolean,
   showBadges: boolean
 ) {
-  // For each render, pick a SINGLE wall sprite for the whole map so the
-  // "carved-in-rock" background and the wall outlines use the same look.
-  // Filter by wall_palette if the LLM specified one for thematic cohesion.
   const mapSeed = hashString(map.title || "x");
-  const wallPool = filterByStonePalette(SPRITES.special.wall, map.wall_palette);
-  const wallSprite =
-    wallPool.length > 0 ? wallPool[mapSeed % wallPool.length] : undefined;
 
-  drawBackground(ctx, map, ts, layers, wallSprite, mapSeed);
+  drawBackground(ctx, map, ts, layers, mapSeed);
   drawCorridorAndRoomFloors(ctx, map, ts, layers, mapSeed);
   drawScatterDecoration(ctx, map, ts, layers);
   drawRoomTint(ctx, map, ts);
   drawSpecialTiles(ctx, map, ts, layers);
-  drawWalls(ctx, map, ts, layers, wallSprite);
+  drawEdgeWalls(ctx, map, ts, layers); // DungeonScrawl-style continuous walls
   drawObjects(ctx, map, ts, layers);
   if (showGrid) drawGrid(ctx, map, ts);
   drawVignette(ctx, map, ts);
@@ -382,36 +377,39 @@ function drawBackground(
   map: MapData,
   ts: number,
   layers: ComputedLayers,
-  wallSprite: Sprite | undefined,
   mapSeed: number
 ) {
-  const isDungeon = map.map_type === "dungeon";
+  const isDungeon = map.map_type === "dungeon" || map.map_type === "interior";
   if (isDungeon) {
-    // "Carved into rock" look: fill ALL non-interior tiles with the wall
-    // sprite. This gives the dungeon a solid stone surrounding instead of
-    // floating rooms in a black void.
-    ctx.fillStyle = "#0a0a14";
+    // Carved-in-rock background: solid procedural stone tinted by wall_palette.
+    // Subtle noise overlay gives texture without breaking uniformity.
+    const colors = paletteColors(map.wall_palette);
+    ctx.fillStyle = colors.fill;
     ctx.fillRect(0, 0, ts * map.width, ts * map.height);
-    const wallImg = wallSprite ? getCachedSprite(wallSprite.url) : null;
+    // Brick-ish offset pattern, very low contrast — looks like carved rock,
+    // doesn't fight with the room floors.
+    ctx.save();
+    ctx.globalAlpha = 0.10;
     for (let y = 0; y < map.height; y++) {
       for (let x = 0; x < map.width; x++) {
         if (layers.interior[y * map.width + x]) continue;
-        if (wallImg) {
-          ctx.drawImage(wallImg, x * ts, y * ts, ts, ts);
-        } else {
-          proceduralWallTile(ctx, x, y, ts);
+        const seed = ((x * 928371) ^ (y * 12831)) >>> 0;
+        if (seed % 9 === 0) {
+          ctx.fillStyle = colors.highlight;
+          ctx.fillRect(x * ts + 2, y * ts + 2, ts - 4, ts - 4);
+        } else if (seed % 13 === 0) {
+          ctx.fillStyle = colors.mortar;
+          ctx.fillRect(x * ts + 4, y * ts + 4, ts - 8, ts - 8);
         }
       }
     }
+    ctx.restore();
     return;
   }
-  // Outdoor maps: tile a SINGLE terrain variant across the whole map.
-  // (We were picking per-tile randomly which mixed dirt + grass + cracked
-  // looking nothing like a real meadow / town floor.)
+  // Outdoor maps: one terrain variant tiled.
   const variants = SPRITES.terrain[map.background_tile];
-  const bgSprite = variants && variants.length
-    ? variants[mapSeed % variants.length]
-    : undefined;
+  const bgSprite =
+    variants && variants.length ? variants[mapSeed % variants.length] : undefined;
   const bgImg = bgSprite ? getCachedSprite(bgSprite.url) : null;
   if (bgImg) {
     for (let y = 0; y < map.height; y++) {
@@ -566,39 +564,84 @@ function drawRoomTint(
   }
 }
 
-function drawWalls(
+function drawEdgeWalls(
   ctx: CanvasRenderingContext2D,
   map: MapData,
   ts: number,
-  layers: ComputedLayers,
-  wallSprite: Sprite | undefined
+  layers: ComputedLayers
 ) {
-  const wallImg = wallSprite ? getCachedSprite(wallSprite.url) : null;
-  for (const w of layers.walls) {
-    if (wallImg) {
-      ctx.drawImage(wallImg, w.x * ts, w.y * ts, ts, ts);
-    } else {
-      proceduralWallTile(ctx, w.x, w.y, ts);
-    }
-  }
-  // Inner edge shadow on walkable tiles adjacent to walls
+  // Edge-rendered walls (DungeonScrawl style). For each interior tile, for
+  // each cardinal side where the neighbour is non-interior, draw a thick
+  // stroke along that edge. Adjacent tiles' strokes meet seamlessly forming
+  // continuous walls, T-junctions and corners — no autotiling needed.
+  const colors = paletteColors(map.wall_palette);
+  const thick = Math.max(3, ts * 0.18);
+  const halfT = thick / 2;
+  const inner = Math.max(1, ts * 0.04);
+
   ctx.save();
-  ctx.fillStyle = "rgba(0,0,0,0.35)";
-  for (let y = 0; y < map.height; y++) {
-    for (let x = 0; x < map.width; x++) {
-      const i = y * map.width + x;
-      if (!layers.interior[i]) continue;
-      // top wall shadow
-      if (y > 0 && !layers.interior[(y - 1) * map.width + x]) {
-        ctx.fillRect(x * ts, y * ts, ts, Math.max(2, ts * 0.08));
+  ctx.lineCap = "butt";
+  ctx.lineJoin = "miter";
+
+  // First pass: shadow underline (offset down 1px for a baked-shadow effect)
+  ctx.strokeStyle = "rgba(0,0,0,0.55)";
+  ctx.lineWidth = thick + 2;
+  drawWallStrokes(ctx, map, layers, ts, halfT);
+
+  // Second pass: the wall itself
+  ctx.strokeStyle = colors.stroke;
+  ctx.lineWidth = thick;
+  drawWallStrokes(ctx, map, layers, ts, halfT);
+
+  // Third pass: thin inner highlight (3D bevel)
+  ctx.strokeStyle = colors.highlight;
+  ctx.lineWidth = inner;
+  drawWallStrokes(ctx, map, layers, ts, halfT - thick * 0.30);
+
+  ctx.restore();
+}
+
+function drawWallStrokes(
+  ctx: CanvasRenderingContext2D,
+  map: MapData,
+  layers: ComputedLayers,
+  ts: number,
+  inset: number
+) {
+  const W = map.width;
+  const H = map.height;
+  const isInterior = (x: number, y: number) =>
+    x >= 0 && y >= 0 && x < W && y < H && !!layers.interior[y * W + x];
+
+  ctx.beginPath();
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (!layers.interior[y * W + x]) continue;
+      const px = x * ts;
+      const py = y * ts;
+      // North edge
+      if (!isInterior(x, y - 1)) {
+        ctx.moveTo(px - inset, py + inset);
+        ctx.lineTo(px + ts + inset, py + inset);
       }
-      // left wall shadow
-      if (x > 0 && !layers.interior[y * map.width + (x - 1)]) {
-        ctx.fillRect(x * ts, y * ts, Math.max(2, ts * 0.08), ts);
+      // South edge
+      if (!isInterior(x, y + 1)) {
+        ctx.moveTo(px - inset, py + ts - inset);
+        ctx.lineTo(px + ts + inset, py + ts - inset);
+      }
+      // West edge
+      if (!isInterior(x - 1, y)) {
+        ctx.moveTo(px + inset, py - inset);
+        ctx.lineTo(px + inset, py + ts + inset);
+      }
+      // East edge
+      if (!isInterior(x + 1, y)) {
+        ctx.moveTo(px + ts - inset, py - inset);
+        ctx.lineTo(px + ts - inset, py + ts + inset);
       }
     }
   }
-  ctx.restore();
+  ctx.stroke();
 }
 
 function proceduralWallTile(
@@ -674,30 +717,13 @@ function drawObjects(
     const img = v ? getCachedSprite(v.url) : null;
 
     if (img && v) {
-      // Sprite carries natural tile dimensions. Anchor convention: (o.x, o.y)
-      // is the top-left tile of the sprite's footprint. The sprite extends
-      // right (v.w tiles) and down (v.h tiles) from there. This keeps small
-      // 1x1 objects in their own tile and lets 2x2/5x5 sprites span properly.
+      // Sprite carries natural tile dimensions. FA sprites ship with their
+      // own baked-in shadows, so we DO NOT composite another one (rulebook
+      // 11.1 — no double shadows).
       const dw = v.w * ts;
       const dh = v.h * ts;
       const dx = o.x * ts;
       const dy = o.y * ts;
-
-      // soft drop shadow (footprint ellipse under the sprite)
-      ctx.save();
-      ctx.fillStyle = "rgba(0,0,0,0.40)";
-      ctx.beginPath();
-      ctx.ellipse(
-        dx + dw / 2,
-        dy + dh - ts * 0.18,
-        dw * 0.40,
-        Math.max(4, ts * 0.10),
-        0,
-        0,
-        Math.PI * 2
-      );
-      ctx.fill();
-      ctx.restore();
 
       ctx.drawImage(img, dx, dy, dw, dh);
     } else {

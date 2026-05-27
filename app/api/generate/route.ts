@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
-import { generateMapJson } from "@/lib/gemini";
+import { generateMapIntent } from "@/lib/gemini";
+import { assembleMapData, layoutMap } from "@/lib/layout";
+import { placeObjectsForMap } from "@/lib/objectPlacer";
 import type { GenerateRequest } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -11,13 +13,22 @@ export async function POST(req: Request) {
     if (!body?.prompt || typeof body.prompt !== "string") {
       return NextResponse.json({ error: "prompt is required" }, { status: 400 });
     }
-    const map = await generateMapJson({
-      prompt: body.prompt,
-      mapType: body.map_type,
-      width: body.width,
-      height: body.height,
-      existingMap: body.existing_map
-    });
+    const width = body.width ?? 30;
+    const height = body.height ?? 20;
+
+    // 1) LLM picks intent only (rooms by purpose+size, materials, connections).
+    const intent = await generateMapIntent({ prompt: body.prompt, width, height });
+
+    // 2) Deterministic layout: BSP partition + MST corridors + doors.
+    const layout = layoutMap(intent);
+
+    // 3) Assemble base MapData (rooms have coords; objects + special_tiles
+    //    are empty placeholders).
+    const map = assembleMapData(intent, layout);
+
+    // 4) Rulebook-driven object placement (one rule set per room purpose).
+    map.objects = placeObjectsForMap(map, layout);
+
     return NextResponse.json({ map });
   } catch (err: any) {
     console.error("/api/generate", err);
